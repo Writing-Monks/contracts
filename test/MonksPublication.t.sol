@@ -6,21 +6,21 @@ import "../src/MonksERC20.sol";
 import "../src/core/MonksTypes.sol";
 import "../src/MonksMarket.sol";
 
-import "../src/oracle/TweetInfoRelayer.sol";
+import "../src/oracle/TweetRelayer.sol";
 import "../mocks/oracle/MockLinkToken.sol";
-import "../mocks/oracle/MockOracle.sol";
+import "../mocks/oracle/MockOperator.sol";
 
 import "forge-std/Test.sol";
 
-// TODO: resolve, 
-contract ContractTest is Test {
+
+contract TestMonksPubContract is Test {
     MonksERC20 public token;
     uint constant initialSupply = 1000E18;
 
     // Oracle
     LinkToken public linkToken;
-    MockOracle public mockOracle;
-    TweetInfoRelayer public tweetRelayer;
+    MockOperator public mockOperator;
+    TweetRelayer public tweetRelayer;
 
     // publication
     
@@ -48,27 +48,27 @@ contract ContractTest is Test {
     event Unpaused(address account);
 
     event OnIssuanceParamsUpdated(uint128[] issuancePerPostType_, int[2][] initialQs, int alpha);
-    event OnPostMade(address indexed author, bytes20 postId, bytes32 contentHash, int alpha, int[2] initialQ, MonksTypes.ResultBounds bounds);
-    event OnPublishedPost(bytes20 postId, uint coreTeamReward, uint journalistReward, uint marketFunding);
-    event OnMarketDeadlineSet(bytes20 indexed postId, uint deadline);
+    event OnPostMade(address indexed author, bytes20 indexed postId, bytes32 contentHash, int alpha, int[2] initialQ, MonksTypes.ResultBounds bounds);
+    event OnPublishedPost(bytes20 indexed postId, address indexed publishedBy, uint coreTeamReward, uint writerReward, uint marketFunding, uint moderationReward);
+    event OnTweetPosted(bytes20 indexed postId, uint tweetId, uint deadline);
     event OnMarketResolved(bytes20 indexed postId, uint result);
 
-    
+
     function setUp() public {
         linkToken = new LinkToken();
-        mockOracle = new MockOracle(address(linkToken));
-        tweetRelayer = new TweetInfoRelayer(address(linkToken), address(mockOracle));
+        mockOperator = new MockOperator(address(linkToken));
+        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator));
 
         bounds = MonksTypes.ResultBounds(0, 1000);
         publication = new MonksPublication();
 
-        payoutSplitBps = MonksTypes.PayoutSplitBps(3000, 4000, 3000);
+        payoutSplitBps = MonksTypes.PayoutSplitBps(1500, 4000, 3000, 1500);
         token = new MonksERC20(initialSupply, address(publication), "BLISS", "BLS");
         post = MonksTypes.Post(0, author, 0);
         MonksMarket _templateMarket = new MonksMarket();
 
-        publication.init(1, postExpirationPeriod, address(_templateMarket), address(0x6),
-                             address(token), payoutSplitBps, publicationAdmin, coreTeam, postSigner, 
+        publication.init(1, postExpirationPeriod, address(_templateMarket), address(token),
+                         payoutSplitBps, publicationAdmin, coreTeam, address(0x6), postSigner, 
                              address(tweetRelayer), bounds);
 
         vm.prank(publicationAdmin);
@@ -81,7 +81,7 @@ contract ContractTest is Test {
     function testSetIssuancesForPostTypeMaximumLossNotCovered() public {
         initialQs = [[initialQs[0][0], initialQs[0][1]+1E18]];
         // uint maximumLoss = publication._getMaxLoss(initialQs[0], alpha, maximumScore);
-        // uint marketFunding = issuancePerPostType[0] * payoutSplitBps.editors / 10000;
+        // uint marketFunding = issuancePerPostType[0] * payoutSplitBps.moderators / 10000;
         // emit log_named_uint('Loss: ', maximumLoss);
         // emit log_named_uint('Funding: ', marketFunding);
         // emit log_named_uint('Margin: ', marketFunding - maximumLoss);
@@ -146,7 +146,6 @@ contract ContractTest is Test {
         uint8 postType = 0;
         address tweetAuthor = 0xA12Dd3E2049ebb0B953AD0B01914fF399955924d;
 
-        
         // sign message
         bytes32 data = keccak256(abi.encodePacked(tweetAuthor, postId, contentHash, postType));
         bytes32 message = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", data));
@@ -158,10 +157,6 @@ contract ContractTest is Test {
 
         vm.prank(tweetAuthor);
         publication.addPost(postId, contentHash, postType, signature);
-        emit log_named_bytes('PostId: ', abi.encodePacked(postId));
-        emit log_named_bytes32('ContentHash: ', contentHash);
-        emit log_named_uint('Post type: ', postType);
-        emit log_named_bytes('Signature:', signature);
     }
 
     function testAddPostTwice() public {    
@@ -179,7 +174,6 @@ contract ContractTest is Test {
         emit OnPostMade(address(this), postId, contentHash, alpha, initialQs[0], bounds);
         publication.addPost(postId, contentHash, postType, signature);
         
-        
         // Shouldn't be able to post the same thing twice
         vm.expectRevert("ERC1167: create2 failed");
         publication.addPost(postId, contentHash, postType, signature);
@@ -187,7 +181,7 @@ contract ContractTest is Test {
 
     function testSetPayoutSplitBpsDoesntSumToOne() public {
         vm.prank(publicationAdmin);
-        MonksTypes.PayoutSplitBps memory split = MonksTypes.PayoutSplitBps(3000, 4000, 1500);
+        MonksTypes.PayoutSplitBps memory split = MonksTypes.PayoutSplitBps(1500, 4000, 1000, 1500);
         vm.expectRevert(DoesntSumToOne.selector);
         publication.setPayoutSplitBps(split);
         vm.stopPrank();
@@ -195,7 +189,7 @@ contract ContractTest is Test {
 
     function testSetPayoutSplitBps() public {
         vm.prank(publicationAdmin);
-        MonksTypes.PayoutSplitBps memory split = MonksTypes.PayoutSplitBps(3000, 5000, 2000);
+        MonksTypes.PayoutSplitBps memory split = MonksTypes.PayoutSplitBps(1500, 5000, 2000, 1500);
         vm.expectEmit(true, true, true, true);
         emit Paused(publicationAdmin);
         publication.setPayoutSplitBps(split);
@@ -208,22 +202,22 @@ contract ContractTest is Test {
         buyShares(market, 1E18);
 
         vm.expectRevert(bytes(abi.encodePacked("AccessControl: account ",
-         Strings.toHexString(address(this))," is missing role ", Strings.toHexString(uint256(keccak256('EDITOR')), 32)
+         Strings.toHexString(address(this))," is missing role ", Strings.toHexString(uint256(keccak256('MODERATOR')), 32)
          )));
-        publication.publish(postId, 123141);
+        publication.publish(postId);
 
 
-        address editor = address(0x85);
-        giveEditorRightTo(editor);
-        vm.prank(editor);
+        address moderator = address(0x85);
+        giveModeratorRightTo(moderator);
+        vm.prank(moderator);
 
-        vm.expectRevert(NotEnoughLink.selector);
-        publication.publish(postId, 123141);
+        vm.expectRevert("ERC20: transfer amount exceeds balance");
+        publication.publish(postId);
     }
 
     function testPublish() public {
-        address editor = address(0x85);
-        giveEditorRightTo(editor);
+        address moderator = address(0x85);
+        giveModeratorRightTo(moderator);
 
         testAddPost();
         IMonksMarket market = IMonksMarket(publication.getMarketAddressOf(postId));
@@ -233,7 +227,7 @@ contract ContractTest is Test {
 
         // link from relayer [from the balance of the pub] to oracle 
         vm.expectEmit(true, true, true, true);
-        emit Transfer(address(tweetRelayer), address(mockOracle), 1E18 / 10);
+        emit Transfer(address(tweetRelayer), address(mockOperator), 1E18 / 10);
 
         // minted new mockERC20
         uint funding = issuancePerPostType[0];
@@ -242,57 +236,69 @@ contract ContractTest is Test {
 
         uint marketFunding = funding * payoutSplitBps.editors / 10000;
         uint writersReward = funding * payoutSplitBps.writer / 10000;
-        uint coreTeamReward = funding - marketFunding - writersReward;
-        uint[3] memory rewards = [writersReward, marketFunding, coreTeamReward];
-        address[3] memory addresses = [market.author(), address(market), coreTeam];
+        uint moderatorsReward = funding * payoutSplitBps.moderators / 10000;
+        uint coreTeamReward = funding * payoutSplitBps.coreTeam / 10000;
+        uint[4] memory rewards = [writersReward, marketFunding, moderatorsReward, coreTeamReward];
+        address[4] memory addresses = [market.author(), address(market), address(0x6), coreTeam];
 
-        for (uint i = 0; i < 3; i++) {
+        for (uint i = 0; i < 4; i++) {
             vm.expectEmit(true, true, true, true);
             emit Transfer(address(publication), addresses[i], rewards[i]);
         }
 
         vm.expectEmit(true, true, true, true);
-        emit OnPublishedPost(postId, coreTeamReward, writersReward, marketFunding);
-        vm.prank(editor);
-        publication.publish(postId, 123141);
+        emit OnPublishedPost(postId, moderator, coreTeamReward, writersReward, marketFunding, moderatorsReward);
+
+        vm.prank(moderator);
+        publication.publish(postId);
         vm.stopPrank();
     }
 
     function testPublishTwice () public {
-        address editor = address(0x85);
+        address moderator = address(0x85);
         depositLinkTo(address(publication), 1E18 / 10);
         testPublish();
 
-        vm.prank(editor);
+        vm.prank(moderator);
         vm.expectRevert(InvalidMarketStatusForAction.selector);
-        publication.publish(postId, 123141);
+        publication.publish(postId);
         vm.stopPrank();
     }
 
-    function testReceivingCreationTime() public {
+    function testOnTweetPosted() public {
         testPublish();
 
         vm.expectEmit(true, true, true, true);
-        emit OnMarketDeadlineSet(postId, 1656341100 + 1 days);
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 1656341100);
+        uint tweetId = 1545;
+        emit OnTweetPosted(postId, tweetId, 1656341100 + 1 days);
+
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1656341100, tweetId));
     }
 
-    function testReceivingCreationTimeTwice() public {
+    function testReceivingOnTweetPostTwice() public {
+        uint tweetId = 1545;
         depositLinkTo(address(publication), 1E18 / 10);
         testPublish();
 
         vm.expectEmit(true, true, true, true);
-        emit OnMarketDeadlineSet(postId, 1656341100 + 1 days);
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 1656341100);
+        emit OnTweetPosted(postId, tweetId, 1656341100 + 1 days);
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1656341100, tweetId));
 
         IMonksMarket market = IMonksMarket(publication.getMarketAddressOf(postId));
         assertEq(market.publishTime(), 1656341100);
+        assertEq(market.tweetId(), tweetId);
 
         vm.prank(publicationAdmin);
-        publication.requestTwitterInfo(postId, 123141, false);
+        publication.requestTweetPublication(postId);
 
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 2);
-        assertEq(market.publishTime(), 1656341100); // Did not change        
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 2, 5));
+        
+        // Did not change   
+        assertEq(market.publishTime(), 1656341100);
+        assertEq(market.tweetId(), tweetId);
     }
 
     function testResolveBeforeDeadline() public {
@@ -300,8 +306,9 @@ contract ContractTest is Test {
 
         vm.expectRevert(MarketDeadlineNotYetReached.selector);
         publication.resolve(postId);
-
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 1656341100);
+        
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1656341100, 5));
 
         vm.warp(1656341100 + 12 hours);
         vm.expectRevert(MarketDeadlineNotYetReached.selector);
@@ -310,7 +317,9 @@ contract ContractTest is Test {
 
     function testResolve() public {
         testPublish();
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 1656341100);
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1656341100, 5));
+        
         depositLinkTo(address(publication), 1E17);
 
         vm.warp(1656341100 + 1 days + 1);
@@ -322,21 +331,25 @@ contract ContractTest is Test {
 
     function testReceiveLikeCount() public {
         testPublish();
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 1656341100);
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1656341100, 5));
         depositLinkTo(address(publication), 2E17);
 
         vm.warp(1656341100 + 1 days + 1);
         publication.resolve(postId);
 
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 50);
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillInfo.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 50));
+        
         MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
 
         assertEq(market.normalisedResult(), 50*1E18 / 1000);
         assertTrue(market.status() == MonksMarket.Status.Resolved);
 
         vm.prank(publicationAdmin);
-        publication.requestTwitterInfo(postId, 1, true);
-        mockOracle.fulfillOracleRequest(mockOracle.lastRequestIdReceived(), 43);
+        publication.requestLikeCount(postId);
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillInfo.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 43));
         assertEq(market.normalisedResult(), 50*1E18 / 1000); //did not change
     }
 
@@ -345,10 +358,9 @@ contract ContractTest is Test {
         tweetRelayer.depositLink(amount, to);
     }
 
-    function giveEditorRightTo(address newEditor) public {
-        bytes32 role = keccak256('EDITOR');
+    function giveModeratorRightTo(address newModerator) public {
         vm.prank(publicationAdmin);
-        publication.grantRole(role, newEditor);
+        publication.grantRole(MonksTypes.MODERATOR_ROLE, newModerator);
         vm.stopPrank();
     }
 

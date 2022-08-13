@@ -21,8 +21,6 @@ contract MonksMarket is IMonksMarket {
     using PRBMathSD59x18 for int256;
     enum Status {Active, Expired, Flagged, Deleted, Published, Resolved}
 
-    bytes32 private constant MODERATOR_ROLE = keccak256("MARKET_MODERATOR");
-
     // Constants assigned during the initialise
     // ***************************************************************************************
     uint public funding;  // total funding for this post (CoreTeam + Writers + Editors/Markets)
@@ -80,8 +78,8 @@ contract MonksMarket is IMonksMarket {
         (uint128 minResult, uint128 maxResult) = _publication.bounds();
         bounds = MonksTypes.ResultBounds(minResult, maxResult);
 
-        (uint16 coreTeam, uint16 writer, uint16 editors) = _publication.payoutSplitBps();
-        _payoutSplitBps = MonksTypes.PayoutSplitBps(coreTeam, writer, editors);
+        (uint16 coreTeam, uint16 writer, uint16 editors, uint16 moderators) = _publication.payoutSplitBps();
+        _payoutSplitBps = MonksTypes.PayoutSplitBps(coreTeam, writer, editors, moderators);
         alpha = _publication.alpha();
         expiryDate = block.timestamp + _publication.postExpirationPeriod();
 
@@ -98,7 +96,7 @@ contract MonksMarket is IMonksMarket {
     // Modifiers
     // ***************************************************************************************
     modifier onlyModerator() {
-        if (!_publication.hasRole(MODERATOR_ROLE, msg.sender)) {
+        if (!_publication.hasRole(MonksTypes.MODERATOR_ROLE, msg.sender)) {
             revert MarketUnauthorized();
         }
         _;
@@ -222,20 +220,20 @@ contract MonksMarket is IMonksMarket {
 
     // Publication Only Functions
     // ***************************************************************************************
-    function publish(uint tweetId_) public onlyPublication onlyStatus(Status.Active) {
+    function publish() public onlyPublication onlyStatus(Status.Active) {
         uint tokensCollected = _monksToken.balanceOf(address(this));
         if (tokensCollected <= 0) {
             revert MarketHasNoBets();
         }
 
-        tweetId = tweetId_;
         _totalTokensCollected = tokensCollected;
         _status = Status.Published;
     }
 
-    function setPublishTime(uint createdAt_) public onlyPublication onlyStatus(Status.Published) {
-        require(publishTime == 0); // Publish time is only set once.
+    function setPublishTimeAndTweetId(uint createdAt_, uint tweetId_) public onlyPublication onlyStatus(Status.Published) {
+        require(publishTime == 0); // Publish time && TweetId is only set once.
         publishTime = createdAt_;
+        tweetId = tweetId_;
     }
 
     /** @notice anyone can call resolve on the ´publication´ contract as long as block.timestamp > publishTime + accumulationTime

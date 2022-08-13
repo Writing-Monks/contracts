@@ -3,21 +3,21 @@ pragma solidity ^0.8.15;
 
 import "forge-std/Test.sol";
 
-import "../src/oracle/TweetInfoRelayer.sol";
+import "../src/oracle/TweetRelayer.sol";
 
 import "../mocks/oracle/MockLinkToken.sol";
-import "../mocks/oracle/MockOracle.sol";
-import "../mocks/oracle/MockTweetRequester.sol";
+import "../mocks/oracle/MockOperator.sol";
+import "../mocks/oracle/MockTweetRelayerClient.sol";
 
 
-contract ContractTest is Test {
+contract TestTweetRelayer is Test {
     uint AMOUNT = 1E18;
     uint tweetId = 1547891527078510592;
-    MockTweetRequester requester;
+    MockTweetRelayerClient requester;
 
     LinkToken public linkToken;
-    MockOracle public mockOracle;
-    TweetInfoRelayer public tweetRelayer;
+    MockOperator public mockOperator;
+    TweetRelayer public tweetRelayer;
     event Transfer(address indexed from, address indexed to, uint256 amount);
 
 
@@ -25,9 +25,9 @@ contract ContractTest is Test {
 
     function setUp() public {
         linkToken = new LinkToken();
-        mockOracle = new MockOracle(address(linkToken));
-        tweetRelayer = new TweetInfoRelayer(address(linkToken), address(mockOracle));
-        requester = new MockTweetRequester();
+        mockOperator = new MockOperator(address(linkToken));
+        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator));
+        requester = new MockTweetRelayerClient();
     }
 
     function testCanMakeRequestTweetLikeCountNotEnoughLink() public {
@@ -43,8 +43,9 @@ contract ContractTest is Test {
         bytes32 requestId = tweetRelayer.requestTweetLikeCount(tweetId);
         assertTrue(requestId != blank_bytes32);
 
+        bytes20 postId = bytes20(uint160(0x115));
         vm.prank(address(requester));
-        requestId = tweetRelayer.requestTweetCreationTimestamp(tweetId);
+        requestId = tweetRelayer.requestTweetPublication(postId);
         assertTrue(requestId != blank_bytes32);
 
         vm.prank(address(requester));
@@ -59,10 +60,23 @@ contract ContractTest is Test {
 
         vm.prank(address(requester));
         bytes32 requestId = tweetRelayer.requestTweetLikeCount(tweetId);
-        mockOracle.fulfillOracleRequest(requestId, 4575);
+        mockOperator.fulfillOracleRequest2(requestId, 0.1 ether, address(tweetRelayer), 
+            tweetRelayer.fulfillInfo.selector, 5 minutes, abi.encode(requestId, uint(4575))
+        );
 
         assertEq(requester.value(), 4575);
         assertEq(requester.requestId(), requestId);
+
+        vm.prank(address(requester));
+        bytes20 postId = bytes20(uint160(0x115));
+        bytes32 requestId2 = tweetRelayer.requestTweetPublication(postId);
+
+
+        mockOperator.fulfillOracleRequest2(requestId2, 0.1 ether, address(tweetRelayer), 
+            tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(requestId2,uint(4575), uint(5)));
+
+        assertEq(requester.value(), 4575);
+        assertEq(requester.value2(), 5);
     }
 
     function testWwithdraw() public {

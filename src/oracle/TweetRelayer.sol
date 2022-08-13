@@ -4,13 +4,16 @@ pragma solidity ^0.8.15;
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
-import "./ITweetRequester.sol";
+import "./ITweetRelayer.sol";
+import "./ITweetRelayerClient.sol";
 
 error UnableToTransfer();
 error NotEnoughLink();
 
 
-contract TweetInfoRelayer is ChainlinkClient {
+/* @note This contract interfaces with the oracle to post tweets and read info from tweet (e.g. like counts)
+*/
+contract TweetRelayer is ITweetRelayer, ChainlinkClient {
     using Chainlink for Chainlink.Request;
     using Strings for uint;
 
@@ -18,13 +21,15 @@ contract TweetInfoRelayer is ChainlinkClient {
 
     mapping(bytes32 => address) private _requesters;
     
-    bytes32 immutable private jobId;
+    bytes32 immutable private getTweetFieldJobId;
+    bytes32 immutable private publishTweetJobId;
     uint256 immutable private fee;
 
-    constructor(address linkAddress_, address oracleAddress_) {
+    constructor(address linkAddress_, address operatorAddress_) {
         setChainlinkToken(linkAddress_);
-        setChainlinkOracle(oracleAddress_);
-        jobId = 'ca98366cc7314957b8c012c72f05aeeb';
+        setChainlinkOracle(operatorAddress_);
+        getTweetFieldJobId = 'ca98366cc7314957b8c012c72f05aeeb';
+        publishTweetJobId = 'ca98366cc7314957b8c012c72f05aeeb';
         fee = (1 * LINK_DIVISIBILITY) / 10; // 0.1 * 10**18
     }
 
@@ -43,7 +48,7 @@ contract TweetInfoRelayer is ChainlinkClient {
      * Twitter outputs an isostring for the created_at (e.g. "created_at": "2022-07-13T13:24:11.000Z"), we translate this to a timestamp to get an uint.
      */
     function requestTweetData(string memory tweetId_, string memory fields_, string memory path_) public returns (bytes32 requestId) {
-        Chainlink.Request memory req = buildChainlinkRequest(jobId, address(this), this.fulfill.selector);
+        Chainlink.Request memory req = buildOperatorRequest(getTweetFieldJobId, this.fulfillInfo.selector);
 
         if (linkBalance[msg.sender] < fee) {
             revert NotEnoughLink();
@@ -54,27 +59,36 @@ contract TweetInfoRelayer is ChainlinkClient {
         req.add('tweet.fields', fields_);
         req.add('path', path_);
         
-        requestId = sendChainlinkRequest(req, fee);
+        requestId = sendOperatorRequest(req, fee);
+        _requesters[requestId] = msg.sender;
+    }
+
+    function requestTweetPublication(bytes20 postId_) public returns (bytes32 requestId) {
+        Chainlink.Request memory req = buildOperatorRequest(getTweetFieldJobId, this.fulfillPublication.selector);
+        req.add('postId', string(abi.encodePacked(postId_)));
+
+        requestId = sendOperatorRequest(req, fee);
         _requesters[requestId] = msg.sender;
     }
 
     /**
-    * @dev some prebuilt calls for the most common requests.
+    * @dev a prebuilt call to get the like count.
     */
     function requestTweetLikeCount(uint tweetId_) public returns (bytes32 requestId) {
         return requestTweetData(tweetId_.toString(), 'public_metrics', 'public_metrics,like_count');
     }
 
-    function requestTweetCreationTimestamp(uint tweetId_) public returns (bytes32 requestId) {
-        return requestTweetData(tweetId_.toString(), 'created_at', 'created_at');
-    }
-
     /**
     * @notice spends at max 400000 gas when calling the receiver.
     */
-    function fulfill(bytes32 requestId_, uint256 value_) public recordChainlinkFulfillment(requestId_) {
-        ITweetRequester requester = ITweetRequester(_requesters[requestId_]);
-        requester.receiveTweetInfo{gas: 400000}(requestId_, value_);
+    function fulfillInfo(bytes32 requestId_, uint value_) public recordChainlinkFulfillment(requestId_) {
+        ITweetRelayerClient requester = ITweetRelayerClient(_requesters[requestId_]);
+        requester.onTweetInfoReceived{gas: 400000}(requestId_, value_);
+    }
+
+    function fulfillPublication(bytes32 requestId_, uint createdAt_, uint tweetId_) public recordChainlinkFulfillment(requestId_) {
+        ITweetRelayerClient requester = ITweetRelayerClient(_requesters[requestId_]);
+        requester.onTweetPosted{gas: 400000}(requestId_, createdAt_, tweetId_);
     }
 
     function depositLink(uint amount_, address to_) public {

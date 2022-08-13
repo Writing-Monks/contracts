@@ -2,3 +2,6 @@ cache/
 out/
 .DS_Store
 nohup.out
+.vscode
+.idea
+python

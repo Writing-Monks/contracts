@@ -20,9 +20,9 @@ contract MockPublication is IMonksPublication, AccessControl {
     uint publicationId;
     address coreTeam;
     address marketTemplate;
-    address adHouse;
     address postSigner;
     address tweetRelayer;
+    address moderationTeam;
 
     event OnPostFlagged(bytes20 indexed postId, address indexed flaggedBy, bytes32 flagReason);
     event OnPostDeleted(bytes20 indexed postId);
@@ -39,16 +39,16 @@ contract MockPublication is IMonksPublication, AccessControl {
         initialQs = initialQs_;
     }
 
-    function init(uint64 publicationId_, uint postExpirationPeriod_, address marketTemplate_, address adHouse_,
-                  address token_, MonksTypes.PayoutSplitBps memory payoutSplitBps_,
-                  address publicationAdmin_, address coreTeam_, address postSigner_, address tweetRelayer_,
-                  MonksTypes.ResultBounds memory bounds_) public {
+    function init(uint64 publicationId_, uint postExpirationPeriod_, address marketTemplate_,
+                  address token_, MonksTypes.PayoutSplitBps calldata payoutSplitBps_,
+                  address publicationAdmin_, address coreTeam_, address moderationTeam_, address postSigner_, address tweetRelayer_,
+                  MonksTypes.ResultBounds calldata bounds_) public {
         _setupRole(DEFAULT_ADMIN_ROLE, publicationAdmin_);
         bounds = bounds_;
         coreTeam = coreTeam_;
+        moderationTeam = moderationTeam_;
         publicationId = publicationId_;
         marketTemplate = marketTemplate_;
-        adHouse = adHouse_;
         postSigner = postSigner_;
         tweetRelayer = tweetRelayer_;
 

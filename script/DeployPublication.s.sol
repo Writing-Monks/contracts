@@ -9,9 +9,9 @@ import "../src/core/MonksTypes.sol";
 import "../src/MonksMarket.sol";
 import "../src/MonksPublication.sol";
 
-import "../src/oracle/TweetInfoRelayer.sol";
+import "../src/oracle/TweetRelayer.sol";
 import "../mocks/oracle/MockLinkToken.sol";
-import "../mocks/oracle/MockOracle.sol";
+import "../mocks/oracle/MockOperator.sol";
 
 
 
@@ -23,13 +23,13 @@ contract Deployer is Script, Test {
 
     // Oracle
     LinkToken public linkToken;
-    MockOracle public mockOracle;
-    TweetInfoRelayer public tweetRelayer;
+    MockOperator public mockOperator;
+    TweetRelayer public tweetRelayer;
 
     // Publication
     MonksPublication public publication;
     MonksTypes.ResultBounds public bounds = MonksTypes.ResultBounds(0, 1000);
-    MonksTypes.PayoutSplitBps payoutSplitBps = MonksTypes.PayoutSplitBps(3000, 4000, 3000);
+    MonksTypes.PayoutSplitBps payoutSplitBps = MonksTypes.PayoutSplitBps(1500, 4000, 3000, 1500);
     uint constant postExpirationPeriod = 3 days;
     uint128[] issuancePerPostType = [3e21];
     int constant alpha = 36067376022224088;
@@ -37,7 +37,7 @@ contract Deployer is Script, Test {
     address public publicationAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
     address coreTeam = address(0x6);
     address postSigner = 0x777C108aCC97d147ba540a99d70704dA36f3D4C2;
-    address adHouse = address(0x6);
+    address moderatorsTeam = address(0x6);
     address testUser = 0xA12Dd3E2049ebb0B953AD0B01914fF399955924d;
 
     function setUp() public {}
@@ -45,8 +45,8 @@ contract Deployer is Script, Test {
     function run() public {
         // Oracle
         linkToken = new LinkToken();
-        mockOracle = new MockOracle(address(linkToken));
-        tweetRelayer = new TweetInfoRelayer(address(linkToken), address(mockOracle));
+        mockOperator = new MockOperator(address(linkToken));
+        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator));
 
         // ERC20
         vm.startBroadcast();
@@ -62,9 +62,9 @@ contract Deployer is Script, Test {
         MonksMarket _templateMarket = new MonksMarket();
 
         // Pub Init
-        publication.init(1, postExpirationPeriod, address(_templateMarket), adHouse,
-                        address(token), payoutSplitBps, publicationAdmin, coreTeam, postSigner, 
-                        address(tweetRelayer), bounds);
+        publication.init(1, postExpirationPeriod, address(_templateMarket), address(token), payoutSplitBps,
+                         publicationAdmin, coreTeam, moderatorsTeam, postSigner, 
+                         address(tweetRelayer), bounds);
 
         publication.setIssuancesForPostType(issuancePerPostType, initialQs, alpha);
         vm.stopBroadcast();

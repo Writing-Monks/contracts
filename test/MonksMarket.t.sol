@@ -48,14 +48,14 @@ contract ContractTest is Test {
     function setUp() public {
         bounds = MonksTypes.ResultBounds(0, 1000);
         mockPublication = new MockPublication(issuancePerPostType, alpha, initialQs);
-        payoutSplitBps = MonksTypes.PayoutSplitBps(3000, 4000, 3000);
+        payoutSplitBps = MonksTypes.PayoutSplitBps(1500, 4000, 3000, 1500);
 
         token = new MonksERC20(initialSupply, address(mockPublication), "BLISS", "BLS");
         post = MonksTypes.Post(0, author, 0);
         market = new MonksMarket();
 
-        mockPublication.init(1, postExpirationPeriod, address(0x2), address(0x6),
-                             address(token), payoutSplitBps, address(publicationAdmin), coreTeam, postSigner, twitterRelayer, bounds);
+        mockPublication.init(1, postExpirationPeriod, address(0x2), address(token), payoutSplitBps,
+         address(publicationAdmin), coreTeam, address(0x6), postSigner, twitterRelayer, bounds);
         vm.prank(address(mockPublication));                  
         market.init(postId, post);
         vm.stopPrank();
@@ -109,20 +109,20 @@ contract ContractTest is Test {
 
     function testPublishNoAccess() public {
         vm.expectRevert(MarketUnauthorized.selector);
-        market.publish(tweetId);
+        market.publish();
     }
 
     function testPublishMarketHasNoBets() public {
         vm.expectRevert(MarketHasNoBets.selector);
         vm.prank(address(mockPublication));
-        market.publish(tweetId);
+        market.publish();
         vm.stopPrank();
     }
 
     function testPublish() public {
         testBuyShares();
         vm.prank(address(mockPublication));
-        market.publish(tweetId);
+        market.publish();
         vm.stopPrank();
     }
 
@@ -165,9 +165,8 @@ contract ContractTest is Test {
     }
 
     function testFlag() public {
-        bytes32 MODERATOR_ROLE = keccak256("MARKET_MODERATOR");
         bytes32 reason = keccak256(abi.encodePacked("Out of topic"));
-        mockPublication.addRole(MODERATOR_ROLE, address(this));
+        mockPublication.addRole(MonksTypes.MODERATOR_ROLE, address(this));
         vm.expectEmit(true, true, true, true);
         emit OnPostFlagged(postId, address(this), reason);
         market.flag(reason);

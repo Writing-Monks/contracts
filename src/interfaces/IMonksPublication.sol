@@ -8,24 +8,19 @@ import "@openzeppelin/contracts/access/IAccessControl.sol";
 
 
 interface IMonksPublication is IAccessControl {
-    // TODO: decide on publicationId
-    //uint64 publicationId;
-
     // Predictive Markets will use this info when initialise
     function postExpirationPeriod() external view returns(uint);
-    // How much to pay for each type of post.
-    // Example of different types of posts may be: memes, news stories, opinion articles, etc..
     function issuancePerPostType(uint postType) external view returns(uint128);
-    function payoutSplitBps() external view returns(uint16 coreTeam, uint16 writer, uint16 editors);
+    function payoutSplitBps() external view returns(uint16 coreTeam, uint16 writer, uint16 editors, uint16 moderators);
     function monksERC20() external view returns(IMonksERC20);
     function alpha() external view returns(int);
     function bounds() external view returns(uint128 minResult, uint128 maxResult);
     function initialQs(uint postType, uint isYes) external view returns(int);
     
 
-    function init(uint64 publicationId_, uint postExpirationPeriod_, address marketTemplate_, address adHouse_,
+    function init(uint64 publicationId_, uint postExpirationPeriod_, address marketTemplate_,
                   address token_, MonksTypes.PayoutSplitBps memory payoutSplitBps_, address publicationAdmin_,
-                  address coreTeam_, address postSigner_, address twitterRelayer_, MonksTypes.ResultBounds memory bounds_) external;
+                  address coreTeam_, address moderationTeam_, address postSigner_, address twitterRelayer_, MonksTypes.ResultBounds memory bounds_) external;
 
 
     // market functions that trigger events

@@ -8,8 +8,8 @@ import "./IMonksPublication.sol";
 interface IMonksMarket {
     function init(bytes20 postId_, MonksTypes.Post memory post_) external;
     function author() external view returns (address);
-    function publish(uint tweetId_) external;
-    function setPublishTime(uint createdAt_) external;
+    function publish() external;
+    function setPublishTimeAndTweetId(uint createdAt_, uint tweetId_) external;
 
     function resolve(uint result_) external;
     function tweetId() external returns (uint);

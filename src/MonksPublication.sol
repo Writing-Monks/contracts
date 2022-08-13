@@ -7,12 +7,10 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
 
-import './oracle/ITweetRequester.sol';
-import './oracle/ITweetInfoRelayer.sol';
+import './oracle/ITweetRelayerClient.sol';
+import './oracle/ITweetRelayer.sol';
 import './interfaces/IMonksPublication.sol';
 import './interfaces/IMonksMarket.sol';
-//import './interfaces/IMonksAdHouseFactory.sol';
-//import './interfaces/IMonksAdAuctionHouse.sol';
 import './PRBMathSD59x18.sol';
 
 error Unauthorized();
@@ -23,48 +21,51 @@ error MaximumLossNotCovered();
 error LooseMargin();
 error MarketDeadlineNotYetReached();
 error ResolveRequestAlreadyMade();
+error UnknownRequestId();
 
 
-// TODO: make it upgradeable and replace msg.sender _msgSender.
-// TODO: add adHouse
-contract MonksPublication is IMonksPublication, ITweetRequester, Pausable, AccessControl {
+contract MonksPublication is IMonksPublication, ITweetRelayerClient, Pausable, AccessControl {
     using PRBMathSD59x18 for int;
     using ECDSA for bytes32;
 
-    bytes32 constant private EDITOR_ROLE = keccak256('EDITOR');
-    uint constant private ACCUMULATION_PERIOD = 1 days; // After publication each tweet will wait for ´ACCUMULATION_PERIOD´ before checking how many likes it received and settle the market.
+    // After publication each tweet will accumulate likes for `ACCUMULATION_PERIOD` and then chainlink can read how many likes it got and settle the prediction market.
+    uint constant private ACCUMULATION_PERIOD = 1 days; 
 
     // Public variables
     // ***************************************************************************************
-    uint public postExpirationPeriod = 3 days;
-    uint128[] public issuancePerPostType;
-    MonksTypes.PayoutSplitBps public payoutSplitBps;
-    IMonksERC20 public monksERC20;
+    uint public postExpirationPeriod = 3 days;  // After `postExpirationPeriod` of being submitted, if the post is not published it expires and betters can get a full refund of their bets.
+
+    // How much to pay for each type of post
+    // Example of different types of posts may be: memes, news stories, opinion articles, etc..
+    uint128[] public issuancePerPostType;  
+    MonksTypes.PayoutSplitBps public payoutSplitBps;  // How is that issuance split amongst: protocol fees, writer, market and moderators.
+    IMonksERC20 public monksERC20;  // The token being issued.
+    
+    // Variables that define the initial conditions and properties of the predictive market:
     int public alpha;
     MonksTypes.ResultBounds public bounds;
     int[2][] public initialQs; // for each postType we have a 2D array with the initial Yes and No shares.
 
     // Private variables
     // ***************************************************************************************
-    uint64 private _publicationId;
-    address private _coreTeam;
-    address private _marketTemplate;
-    address private _postSigner;
-    mapping(bytes20 => bool) private _resolveRequestMade; // {postId: bool}
-
-    // oracle variables
-    ITweetInfoRelayer private _twitterRelayer;
+    address private _coreTeam;  // address where the protocol fees will be sent
+    address private _moderationTeam;  // address where the moderators pay will be sent
+    address private _marketTemplate;  // address of the predictive market contract template
+    address private _postSigner;  // address that signs the posts being submitted
+    
+    // Oracle variables:
+    ITweetRelayer private _twitterRelayer;  // contract that relays the information from the oracle
+    mapping(bytes20 => bool) private _resolveRequestMade; // {postId: bool} - whether the contract already asked chainlink to get the like count on the post
     mapping(bytes32 => bytes20) private _likeCountRequests; // mapping from requestId to postId for requests on like counts
-    mapping(bytes32 => bytes20) private _createdAtRequests; // mapping from requestId to postId for requests on creation date
+    mapping(bytes32 => bytes20) private _publicationRequests; // mapping from requestId to postId for requests on creation date
 
-    //IMonksAdAuctionHouse private _adHouse; // TODO: get it from a deterministic
     bool private _isInitialised;
     event OnPublicationInitialised(uint64 id, MonksTypes.PayoutSplitBps payoutSplitBps, MonksTypes.ResultBounds bounds, address tokenAddress);
     event OnIssuanceParamsUpdated(uint128[] issuancePerPostType, int[2][] initialQs, int alpha);
     event OnResultBoundsUpdated(MonksTypes.ResultBounds bounds);
-    event OnPostMade(address indexed author, bytes20 postId, bytes32 contentHash, int alpha, int[2] initialQ, MonksTypes.ResultBounds bounds);
-    event OnPublishedPost(bytes20 postId, uint coreTeamReward, uint writerReward, uint marketFunding);
-    event OnMarketDeadlineSet(bytes20 indexed postId, uint deadline);
+    event OnPostMade(address indexed author, bytes20 indexed postId, bytes32 contentHash, int alpha, int[2] initialQ, MonksTypes.ResultBounds bounds);
+    event OnPublishedPost(bytes20 indexed postId, address indexed publishedBy, uint coreTeamReward, uint writerReward, uint marketFunding, uint moderationReward);
+    event OnTweetPosted(bytes20 indexed postId, uint tweetId, uint deadline);
     event OnMarketResolved(bytes20 indexed postId, uint result);
     event OnPostExpirationPeriodUpdated(uint newPostExpirationPeriod);
 
@@ -76,21 +77,17 @@ contract MonksPublication is IMonksPublication, ITweetRequester, Pausable, Acces
     event OnRefundTaken(bytes20 indexed postId, address indexed to, uint value);
 
 
-    function init (uint64 publicationId_, uint postExpirationPeriod_, address marketTemplate_, address adHouse_,
-                   address token_, MonksTypes.PayoutSplitBps memory payoutSplitBps_, address publicationAdmin_, address coreTeam_,
+    function init (uint64 publicationId_, uint postExpirationPeriod_, address marketTemplate_, address token_, MonksTypes.PayoutSplitBps memory payoutSplitBps_,
+                   address publicationAdmin_, address coreTeam_, address moderationTeam_,
                    address postSigner_, address twitterRelayer_, MonksTypes.ResultBounds memory bounds_)
-                   public {
+                   public validPayoutSplitBps(payoutSplitBps_){
         require(!_isInitialised);
-        if (payoutSplitBps_.coreTeam + payoutSplitBps_.writer + payoutSplitBps_.editors != 10000){
-            revert DoesntSumToOne();
-        }
 
-        _twitterRelayer = ITweetInfoRelayer(twitterRelayer_);
-        _publicationId = publicationId_;
+        _twitterRelayer = ITweetRelayer(twitterRelayer_);
         postExpirationPeriod = postExpirationPeriod_;
         _marketTemplate = marketTemplate_;
-        //_adHouse = adHouse_;
         monksERC20 = IMonksERC20(token_);
+        _moderationTeam = moderationTeam_;
         _coreTeam = coreTeam_;
         _postSigner = postSigner_;
         payoutSplitBps = payoutSplitBps_;
@@ -181,9 +178,9 @@ contract MonksPublication is IMonksPublication, ITweetRequester, Pausable, Acces
         return keccak256(message).toEthSignedMessageHash().recover(signature_) == _postSigner;
     }
 
-    function _requestCreationDate(bytes20 postId_, uint tweetId_) internal {
-        bytes32 requestId = _twitterRelayer.requestTweetCreationTimestamp(tweetId_);
-        _createdAtRequests[requestId] = postId_;
+    function _requestTweetPublication(bytes20 postId_) internal {
+        bytes32 requestId = _twitterRelayer.requestTweetPublication(postId_);
+        _publicationRequests[requestId] = postId_;
     }
 
     function _requestLikeCount(bytes20 postId_, address marketAddress) internal {
@@ -240,22 +237,21 @@ contract MonksPublication is IMonksPublication, ITweetRequester, Pausable, Acces
         _postSigner = value_;
     }
 
-    function setPayoutSplitBps(MonksTypes.PayoutSplitBps calldata payoutSplitBps_) public onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (payoutSplitBps_.coreTeam + payoutSplitBps_.writer + payoutSplitBps_.editors != 10000) {
-            revert DoesntSumToOne();
-        }
-
+    function setPayoutSplitBps(MonksTypes.PayoutSplitBps calldata payoutSplitBps_) public validPayoutSplitBps(payoutSplitBps_) onlyRole(DEFAULT_ADMIN_ROLE) {
         if (payoutSplitBps.editors != payoutSplitBps_.editors) {
             // Our issuance for the market is now invalid, we need to re-call setIssuancesForPostType with valid params.
             _pause();
+            payoutSplitBps = payoutSplitBps_;
         }
-
-        payoutSplitBps = payoutSplitBps_;
     }
 
     function setPostExpirationPeriod(uint value_) public onlyRole(DEFAULT_ADMIN_ROLE) {
         postExpirationPeriod = value_;
         emit OnPostExpirationPeriodUpdated(value_);
+    }
+
+    function setModerationTeam(address value) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        _moderationTeam = value;
     }
 
     // Editor and Admin Functions
@@ -265,12 +261,10 @@ contract MonksPublication is IMonksPublication, ITweetRequester, Pausable, Acces
     *  Asks the twitter oracle to get the timestamp for when the tweet was published, this will be used
     *  to set the deadline on the predictive market.
     *  Pays the writer and the core team and funds the predictive market.
-    *  Burns the tokens from the ad house (if there are ads).
     */
-    function publish(bytes20 postId_, uint tweetId_) public onlyRole(EDITOR_ROLE) {
-        // TODO: get the ad, tell chainlink to post tweet and append ad, store the twitter id in a map (contentHash->twitterId)
-        // TODO: make a role for this, change the stats of the author (for the nft)
-        _requestCreationDate(postId_, tweetId_);
+
+    function publish(bytes20 postId_) public onlyRole(MonksTypes.MODERATOR_ROLE) {
+        _requestTweetPublication(postId_);
 
         IMonksMarket market = IMonksMarket(getMarketAddressOf(postId_));
         uint funding = market.funding();
@@ -279,56 +273,82 @@ contract MonksPublication is IMonksPublication, ITweetRequester, Pausable, Acces
         monksERC20.getPublicationFunding(funding);
 
         // Publish
-        market.publish(tweetId_);
+        market.publish();
 
         // Compute the payout to coreTeam, writer and editors
         MonksTypes.PayoutSplitBps memory _marketPayoutSplit = market.payoutSplitBps();
         uint _marketFunding = funding * _marketPayoutSplit.editors / 10000;
         uint _writersReward = funding * _marketPayoutSplit.writer / 10000;
-        uint _coreTeamReward = funding - _marketFunding - _writersReward;
+        uint _moderatorsReward = funding * _marketPayoutSplit.moderators / 10000;
+        uint _coreTeamReward = funding * _marketPayoutSplit.coreTeam / 10000;
         
         // Pay out
         address author = market.author();
         monksERC20.transfer(author, _writersReward);
         monksERC20.transfer(address(market), _marketFunding);
+        monksERC20.transfer(_moderationTeam, _moderatorsReward);
         monksERC20.transfer(_coreTeam, _coreTeamReward);
         
-        emit OnPublishedPost(postId_, _coreTeamReward, _writersReward, _marketFunding);
+        emit OnPublishedPost(postId_, msg.sender, _coreTeamReward, _writersReward, _marketFunding, _moderatorsReward);
     }
 
     /**
-    * @notice ´_requestTwitterInfo´ is called by the publish and by the resolve function. However, it can also be called manually by an admin, which is useful, 
+    * @notice `_requestTweetPublication` is called by the publish function. However, it can also be called manually by an admin, which is useful, 
     * if an error occurs with the chainlink oracle and we need to repeat a request.
+    * The market will not override the tweet id && creation date if it was already successfully set.
     */
-    function requestTwitterInfo(bytes20 postId_, uint tweetId_, bool likeCount_) public onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (likeCount_) {
-            _requestLikeCount(postId_, getMarketAddressOf(postId_));
-        } else {
-            _requestCreationDate(postId_, tweetId_);
-        }
+    function requestTweetPublication(bytes20 postId_) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        _requestTweetPublication(postId_);
     }
 
-    // TwitterInfoRelayer Functions
-    // ***************************************************************************************
-    function receiveTweetInfo(bytes32 requestId_, uint value_) public {
-        require(msg.sender == address(_twitterRelayer));
-        if (_createdAtRequests[requestId_] != 0) {
-            bytes20 postId = _createdAtRequests[requestId_];
-            IMonksMarket market = IMonksMarket(getMarketAddressOf(postId));
-            market.setPublishTime(value_);
-            emit OnMarketDeadlineSet(postId, value_ + ACCUMULATION_PERIOD);
-        } else if (_likeCountRequests[requestId_] != 0) {
-            bytes20 postId = _likeCountRequests[requestId_];
-            IMonksMarket market = IMonksMarket(getMarketAddressOf(postId));
-            market.resolve(value_);
-            emit OnMarketResolved(postId, value_);
-        } else {
-            revert();
-        }
+    /**
+    * @notice `_requestLikeCount` is called by the resolve function. However, it can also be called manually by an admin, which is useful, 
+    * if an error occurs with the chainlink oracle and we need to repeat a request.
+    * The market will not override the like count if it was already successfully set.
+    */
+    function requestLikeCount(bytes20 postId_) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        _requestLikeCount(postId_, getMarketAddressOf(postId_));
     }
 
-    // Market Functions That Trigger Events
+    // TwitterRelayerClient Functions
     // ***************************************************************************************
+    function onTweetInfoReceived(bytes32 requestId_, uint value_) public onlyTweetRelayer {
+        if (_likeCountRequests[requestId_] == 0) {
+            revert UnknownRequestId();
+        }
+        bytes20 postId = _likeCountRequests[requestId_];
+        IMonksMarket market = IMonksMarket(getMarketAddressOf(postId));
+        market.resolve(value_);
+        emit OnMarketResolved(postId, value_);
+    }
+
+    function onTweetPosted(bytes32 requestId_, uint createdAt_, uint tweetId_) public onlyTweetRelayer {
+        if (_publicationRequests[requestId_] == 0) {
+            revert UnknownRequestId();
+        }
+        bytes20 postId = _publicationRequests[requestId_];
+        IMonksMarket market = IMonksMarket(getMarketAddressOf(postId));
+        market.setPublishTimeAndTweetId(createdAt_, tweetId_);
+        emit OnTweetPosted(postId, tweetId_, createdAt_ + ACCUMULATION_PERIOD);
+    }
+
+
+    // Modifiers
+    // ***************************************************************************************
+    modifier onlyTweetRelayer(){
+        if (msg.sender != address(_twitterRelayer)) {
+            revert Unauthorized();
+        }
+        _;
+    }
+
+    modifier validPayoutSplitBps(MonksTypes.PayoutSplitBps memory payoutSplitBps_) {
+        if (payoutSplitBps_.coreTeam + payoutSplitBps_.writer + payoutSplitBps_.editors + payoutSplitBps_.moderators != 10000){
+            revert DoesntSumToOne();
+        }
+        _;
+    }
+
     modifier onlyMarket(bytes20 postId_) {
         if (msg.sender != getMarketAddressOf(postId_)) {
             revert Unauthorized();
@@ -336,6 +356,9 @@ contract MonksPublication is IMonksPublication, ITweetRequester, Pausable, Acces
         _;
     }
 
+
+    // Market Functions That Trigger Events
+    // ***************************************************************************************
     function emitOnPostFlagged(bytes20 postId_, address flaggedBy_, bytes32 flagReason_) public onlyMarket(postId_) {
         emit OnPostFlagged(postId_, flaggedBy_, flagReason_);
     }
