@@ -18,6 +18,8 @@ contract TestTweetRelayer is Test {
     LinkToken public linkToken;
     MockOperator public mockOperator;
     TweetRelayer public tweetRelayer;
+    bytes32 readTweetJobId;
+    bytes32 writeTweetJobId;
     event Transfer(address indexed from, address indexed to, uint256 amount);
 
 
@@ -26,8 +28,9 @@ contract TestTweetRelayer is Test {
     function setUp() public {
         linkToken = new LinkToken();
         mockOperator = new MockOperator(address(linkToken));
-        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator));
-        requester = new MockTweetRelayerClient();
+        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator),readTweetJobId,
+        writeTweetJobId);
+        requester = new MockTweetRelayerClient(address(tweetRelayer));
     }
 
     function testCanMakeRequestTweetLikeCountNotEnoughLink() public {

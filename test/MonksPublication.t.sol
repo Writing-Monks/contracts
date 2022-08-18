@@ -21,9 +21,10 @@ contract TestMonksPubContract is Test {
     LinkToken public linkToken;
     MockOperator public mockOperator;
     TweetRelayer public tweetRelayer;
+    bytes32 writeTweetJobId;
+    bytes32 readTweetJobId;
 
-    // publication
-    
+    // Publication
     bytes20 postId = bytes20(uint160(504715298142089654741934029154195845793245849718));
     MonksTypes.ResultBounds public bounds;
     MonksPublication public publication;
@@ -57,7 +58,7 @@ contract TestMonksPubContract is Test {
     function setUp() public {
         linkToken = new LinkToken();
         mockOperator = new MockOperator(address(linkToken));
-        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator));
+        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator), readTweetJobId, writeTweetJobId);
 
         bounds = MonksTypes.ResultBounds(0, 1000);
         publication = new MonksPublication();

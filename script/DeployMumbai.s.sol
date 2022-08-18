@@ -20,13 +20,8 @@ contract Deployer is Script, Test {
     uint constant initialSupply = 1000E18;
     MonksERC20 public token;
     
-
     // Oracle
-    LinkToken public linkToken;
-    MockOperator public mockOperator;
-    TweetRelayer public tweetRelayer;
-    bytes32 readTweetJobId;
-    bytes32 writeTweetJobId;
+    address public tweetRelayerAddress = 0x268973802ec6EACc6201646db0C1421E9C8673ea;
 
     // Publication
     MonksPublication public publication;
@@ -36,29 +31,24 @@ contract Deployer is Script, Test {
     uint128[] issuancePerPostType = [3e21];
     int constant alpha = 36067376022224088;
     int[2][] initialQs = [[int(3757338014575875325952), int(4641401983168921206784)]];
-    address public publicationAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-    address coreTeam = address(0x6);
+    address publicationAdmin = 0xccb4D1786a2d25484957f33F1354cc487bE157CD;
+    address coreTeam = 0x15d2d027c8E2CcD5295E35659B76E61dEF483eE7;
     address postSigner = 0x777C108aCC97d147ba540a99d70704dA36f3D4C2;
-    address moderatorsTeam = address(0x6);
-    address testUser = 0xA12Dd3E2049ebb0B953AD0B01914fF399955924d;
+    address moderatorsTeam = 0x15d2d027c8E2CcD5295E35659B76E61dEF483eE7;
+    address testUser = 0xccb4D1786a2d25484957f33F1354cc487bE157CD;
 
     function setUp() public {}
 
     function run() public {
-        // Oracle
-        linkToken = new LinkToken();
-        mockOperator = new MockOperator(address(linkToken));
-        tweetRelayer = new TweetRelayer(address(linkToken), address(mockOperator), readTweetJobId,
-            writeTweetJobId);
-
         // ERC20
         vm.startBroadcast();
         publication = new MonksPublication();
         emit log_named_address('Publication address:', address(publication));
 
-        token = new MonksERC20(initialSupply, address(publication), "Crypto Alpha", "CAL");
+        token = new MonksERC20(initialSupply, address(publication), "Monks Test ERC20", "MNK");
         emit log_named_address('Token address:', address(token));
-        // Fund our user
+
+        // Fund our test user
         token.transfer(testUser, 300 ether);
 
         // Market Template
@@ -67,18 +57,9 @@ contract Deployer is Script, Test {
         // Pub Init
         publication.init(1, postExpirationPeriod, address(_templateMarket), address(token), payoutSplitBps,
                          publicationAdmin, coreTeam, moderatorsTeam, postSigner, 
-                         address(tweetRelayer), bounds);
+                         tweetRelayerAddress, bounds);
 
         publication.setIssuancesForPostType(issuancePerPostType, initialQs, alpha);
         vm.stopBroadcast();
-
-
-        
     }
 }
-
-
-// Deploy this locally:
-// 1 - Start anvil (type "anvil" on a terminal).
-// 2 - forge script script/NFT.s.sol:MyScript --fork-url http://localhost:8545 \
-//--private-key $PRIVATE_KEY0 --broadcast

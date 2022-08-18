@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.15;
 
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
@@ -11,7 +11,8 @@ error UnableToTransfer();
 error NotEnoughLink();
 
 
-/* @note This contract interfaces with the oracle to post tweets and read info from tweet (e.g. like counts)
+/*
+ * @note This contract interfaces with the oracle to post tweets and read info from tweet (e.g. like counts)
 */
 contract TweetRelayer is ITweetRelayer, ChainlinkClient {
     using Chainlink for Chainlink.Request;
@@ -21,16 +22,15 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
 
     mapping(bytes32 => address) private _requesters;
     
-    bytes32 immutable private getTweetFieldJobId;
-    bytes32 immutable private publishTweetJobId;
-    uint256 immutable private fee;
+    bytes32 public readTweetJobId;
+    bytes32 public writeTweetJobId;
+    uint256 constant private fee = (1 * LINK_DIVISIBILITY) / 10; // 0.1 * 10**18
 
-    constructor(address linkAddress_, address operatorAddress_) {
+    constructor(address linkAddress_, address operatorAddress_, bytes32 readTweetJobId_, bytes32 writeTweetJobId_) {
         setChainlinkToken(linkAddress_);
         setChainlinkOracle(operatorAddress_);
-        getTweetFieldJobId = 'ca98366cc7314957b8c012c72f05aeeb';
-        publishTweetJobId = 'ca98366cc7314957b8c012c72f05aeeb';
-        fee = (1 * LINK_DIVISIBILITY) / 10; // 0.1 * 10**18
+        readTweetJobId = readTweetJobId_;
+        writeTweetJobId = writeTweetJobId_;
     }
 
     /**
@@ -43,12 +43,12 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
           'text': 'This is the tweet'
          }
        }
-     * Especify the path to your result on the path variable, ignoring the data keyword. Example, to obtain the like_count, path should be 'public_metrics,like_count'
+     * Specify the path to your result on the `path` variable, ignoring the data keyword. Example, to obtain the like_count, path should be 'public_metrics,like_count'
      
-     * Twitter outputs an isostring for the created_at (e.g. "created_at": "2022-07-13T13:24:11.000Z"), we translate this to a timestamp to get an uint.
+     * Twitter outputs an isostring for the created_at field (e.g. "created_at": "2022-07-13T13:24:11.000Z"), we translate this to a timestamp to get an uint.
      */
     function requestTweetData(string memory tweetId_, string memory fields_, string memory path_) public returns (bytes32 requestId) {
-        Chainlink.Request memory req = buildOperatorRequest(getTweetFieldJobId, this.fulfillInfo.selector);
+        Chainlink.Request memory req = buildOperatorRequest(readTweetJobId, this.fulfillInfo.selector);
 
         if (linkBalance[msg.sender] < fee) {
             revert NotEnoughLink();
@@ -56,7 +56,7 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
         linkBalance[msg.sender] -= fee;
 
         req.add('tweetId', tweetId_);
-        req.add('tweet.fields', fields_);
+        req.add('tweet_fields', fields_);
         req.add('path', path_);
         
         requestId = sendOperatorRequest(req, fee);
@@ -64,7 +64,7 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
     }
 
     function requestTweetPublication(bytes20 postId_) public returns (bytes32 requestId) {
-        Chainlink.Request memory req = buildOperatorRequest(getTweetFieldJobId, this.fulfillPublication.selector);
+        Chainlink.Request memory req = buildOperatorRequest(writeTweetJobId, this.fulfillPublication.selector);
         req.add('postId', string(abi.encodePacked(postId_)));
 
         requestId = sendOperatorRequest(req, fee);
