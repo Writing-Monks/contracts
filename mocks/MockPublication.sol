@@ -27,7 +27,7 @@ contract MockPublication is IMonksPublication, AccessControl {
     event OnPostFlagged(bytes20 indexed postId, address indexed flaggedBy, bytes32 flagReason);
     event OnPostDeleted(bytes20 indexed postId);
     event OnSharesBought(bytes20 indexed postId, address indexed buyer, uint sharesBought, uint cost, bool isYes);
-    event OnTokensRedeemed(bytes20 indexed postId, address indexed redeemer, uint tokensReceived);
+    event OnTokensRedeemed(bytes20 indexed postId, address indexed redeemer, uint tokensReceived, uint tokensBetted);
     event OnRefundTaken(bytes20 indexed postId, address indexed to, uint value);
 
 
@@ -76,8 +76,8 @@ contract MockPublication is IMonksPublication, AccessControl {
         emit OnSharesBought(postId_, buyer_, sharesBought_, cost_, isYes_);
     }
 
-    function emitOnTokensRedeemed(bytes20 postId_, address redeemer_, uint tokensReceived_) public {
-        emit OnTokensRedeemed(postId_, redeemer_, tokensReceived_);
+    function emitOnTokensRedeemed(bytes20 postId_, address redeemer_, uint tokensReceived_, uint tokensBetted_) public {
+        emit OnTokensRedeemed(postId_, redeemer_, tokensReceived_, tokensBetted_);
     }
 
     function emitOnRefundTaken(bytes20 postId_, address to_, uint value_) public {

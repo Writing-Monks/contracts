@@ -21,7 +21,7 @@ contract Deployer is Script, Test {
     MonksERC20 public token;
     
     // Oracle
-    address public tweetRelayerAddress = 0x268973802ec6EACc6201646db0C1421E9C8673ea;
+    address public tweetRelayerAddress = 0x6e710cc7d99B0240FCeB22180528F688b077c7Bd;
 
     // Publication
     MonksPublication public publication;
@@ -60,6 +60,7 @@ contract Deployer is Script, Test {
                          tweetRelayerAddress, bounds);
 
         publication.setIssuancesForPostType(issuancePerPostType, initialQs, alpha);
+        publication.grantRole(MonksTypes.MODERATOR_ROLE, testUser);
         vm.stopBroadcast();
     }
 }

@@ -107,6 +107,8 @@ contract MockOperator is LinkTokenReceiver {
     mapping(bytes32 => Commitment) private s_commitments;
 
     bytes32 public lastRequestIdReceived;
+    address public lastCallbackAddress;
+    bytes4 public lastCallbackFunctionId;
 
     event OracleRequest(
         bytes32 indexed specId,
@@ -188,6 +190,8 @@ contract MockOperator is LinkTokenReceiver {
     ) external onlyLINK {
         bytes32 requestId = keccak256(abi.encodePacked(sender, nonce));
         lastRequestIdReceived = requestId;
+        lastCallbackAddress = sender;
+        lastCallbackFunctionId = callbackFunctionId;
                 require(
             s_commitments[requestId].paramsHash == 0,
             "Must use a unique ID"
@@ -200,6 +204,15 @@ contract MockOperator is LinkTokenReceiver {
         emit OracleRequest(specId, sender, requestId, payment, sender, callbackFunctionId, expiration, dataVersion, data);
     }
 
+    function fullfillLastInfoRequest() public {
+        fulfillOracleRequest2(lastRequestIdReceived, 0.1 ether, lastCallbackAddress, lastCallbackFunctionId,
+         EXPIRY_TIME, abi.encode(lastRequestIdReceived, 77));
+    }
+
+    function fullfillLastTweetPublication() public {
+        fulfillOracleRequest2(lastRequestIdReceived, 0.1 ether, lastCallbackAddress, lastCallbackFunctionId,
+         EXPIRY_TIME, abi.encode(lastRequestIdReceived, block.timestamp + 1 days, 1337));
+    }
 
     function _buildParamsHash(
         uint256 payment,
@@ -243,7 +256,7 @@ contract MockOperator is LinkTokenReceiver {
     uint256 expiration,
     bytes32 data
   )
-    external
+    public
     
     isValidRequest(requestId)
     returns (bool)
@@ -280,9 +293,9 @@ contract MockOperator is LinkTokenReceiver {
     address callbackAddress,
     bytes4 callbackFunctionId,
     uint256 expiration,
-    bytes calldata data
+    bytes memory data
   )
-    external
+    public
     
     isValidRequest(requestId)
     returns (bool)

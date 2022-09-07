@@ -36,15 +36,16 @@ contract Deployer is Script, Test {
     uint128[] issuancePerPostType = [3e21];
     int constant alpha = 36067376022224088;
     int[2][] initialQs = [[int(3757338014575875325952), int(4641401983168921206784)]];
-    address public publicationAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+    address public publicationAdmin = 0xccb4D1786a2d25484957f33F1354cc487bE157CD;
     address coreTeam = address(0x6);
     address postSigner = 0x777C108aCC97d147ba540a99d70704dA36f3D4C2;
     address moderatorsTeam = address(0x6);
-    address testUser = 0xA12Dd3E2049ebb0B953AD0B01914fF399955924d;
+    address testUser = 0xccb4D1786a2d25484957f33F1354cc487bE157CD;
 
     function setUp() public {}
 
     function run() public {
+        vm.startBroadcast();
         // Oracle
         linkToken = new LinkToken();
         mockOperator = new MockOperator(address(linkToken));
@@ -52,7 +53,6 @@ contract Deployer is Script, Test {
             writeTweetJobId);
 
         // ERC20
-        vm.startBroadcast();
         publication = new MonksPublication();
         emit log_named_address('Publication address:', address(publication));
 
@@ -70,6 +70,8 @@ contract Deployer is Script, Test {
                          address(tweetRelayer), bounds);
 
         publication.setIssuancesForPostType(issuancePerPostType, initialQs, alpha);
+
+        publication.grantRole(MonksTypes.MODERATOR_ROLE, testUser);
         vm.stopBroadcast();
 
 

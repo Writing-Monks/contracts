@@ -1,5 +1,6 @@
-//"SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.15;
+// SPDX-License-Identifier: BUSL-1.1
+
+pragma solidity ^0.8.16;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -23,7 +24,7 @@ contract MonksMarket is IMonksMarket {
 
     // Constants assigned during the initialise
     // ***************************************************************************************
-    uint public funding;  // total funding for this post (CoreTeam + Writers + Editors/Markets)
+    uint public funding;  // total funding for this post (Protocol + Writers + Predictors/Markets + Moderators)
     MonksTypes.PayoutSplitBps private _payoutSplitBps; // we have a getter for this
     uint public expiryDate;
     int public alpha;
@@ -37,7 +38,7 @@ contract MonksMarket is IMonksMarket {
     // Constants assigns after publication:
     uint public tweetId;
     uint public publishTime;
-    uint private _totalTokensCollected;
+    uint private totalTokensCollected;
 
     // State variables
     // ***************************************************************************************
@@ -47,7 +48,7 @@ contract MonksMarket is IMonksMarket {
     int[2] public q;
     int[2] private _initialQ;
     mapping(address => int[2]) public sharesOf;
-    mapping(address => uint) public squeezeOf;
+    mapping(address => uint) public tokensOf;
 
     Status private _status;
     // MonksMarket are positive-sum, meaning that the market always loses money to the participants.
@@ -62,9 +63,6 @@ contract MonksMarket is IMonksMarket {
     int public normalisedResult;
 
     bool private _isInitialised;
-
-    // TODO: should the publication get these notifications?
-
 
     function init(bytes20 postId_, MonksTypes.Post memory post_) public {
         if (_isInitialised == true) {
@@ -128,7 +126,7 @@ contract MonksMarket is IMonksMarket {
         uint8 outcomeIndex = isYes_ ? 0 : 1;
         q[outcomeIndex] += sharesToBuy_;
         sharesOf[msg.sender][outcomeIndex] += sharesToBuy_;
-        squeezeOf[msg.sender] += amountToPay;
+        tokensOf[msg.sender] += amountToPay;
         _publication.emitOnSharesBought(_postId, msg.sender, uint(sharesToBuy_), amountToPay, isYes_);
     }
 
@@ -149,18 +147,18 @@ contract MonksMarket is IMonksMarket {
             amount += uint((1E18 - normalisedResult).mul(shares[1]));
         }
         if (exceeding > 0) {
-            amount += exceeding * squeezeOf[msg.sender] / _totalTokensCollected;
+            amount += exceeding * tokensOf[msg.sender] / totalTokensCollected;
         }
         _monksToken.transfer(msg.sender, amount);
-        _publication.emitOnTokensRedeemed(_postId, msg.sender, amount);
+        _publication.emitOnTokensRedeemed(_postId, msg.sender, amount, tokensOf[msg.sender]);
     }
 
     function getRefund() public {
         Status s = status();
-        require(s != Status.Active && s != Status.Published && s != Status.Resolved);
-        uint amount = squeezeOf[msg.sender];
+        require(s == Status.Expired || s == Status.Flagged);
+        uint amount = tokensOf[msg.sender];
         require(amount > 0);
-        squeezeOf[msg.sender] = 0;
+        tokensOf[msg.sender] = 0;
         _monksToken.transfer(msg.sender, amount);
         _publication.emitOnRefundTaken(_postId, msg.sender, amount);
     }
@@ -226,7 +224,7 @@ contract MonksMarket is IMonksMarket {
             revert MarketHasNoBets();
         }
 
-        _totalTokensCollected = tokensCollected;
+        totalTokensCollected = tokensCollected;
         _status = Status.Published;
     }
 
@@ -243,7 +241,7 @@ contract MonksMarket is IMonksMarket {
         int _normalisedResult = int(_normaliseResult(result_));
         // The publication should have transfered the marketFunding to this contract before calling resolve.
         uint balance = _monksToken.balanceOf(address(this));
-        if (balance - _totalTokensCollected != funding * _payoutSplitBps.editors / 10000) {
+        if (balance - totalTokensCollected != funding * _payoutSplitBps.editors / 10000) {
             revert MarketIsNotFunded();
         }
         uint dept = uint(((q[0] - _initialQ[0]).mul(_normalisedResult) + (q[1] - _initialQ[1]).mul(1E18 - _normalisedResult)));

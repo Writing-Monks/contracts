@@ -44,6 +44,7 @@ contract ContractTest is Test {
     event Transfer(address indexed from, address indexed to, uint256 amount);
     event OnPostFlagged(bytes20 indexed postId, address indexed flaggedBy, bytes32 flagReason);
     event OnPostDeleted(bytes20 indexed postId);
+    event OnRefundTaken(bytes20 indexed postId, address indexed to, uint value);
 
     function setUp() public {
         bounds = MonksTypes.ResultBounds(0, 1000);
@@ -66,7 +67,7 @@ contract ContractTest is Test {
         market.init(postId, post);
     }
 
-    function testBuyShares() public {
+    function testBuyShares() public returns (uint) {
         bool isYes = true;
         int sharesToBuy = 1e18;
 
@@ -87,6 +88,7 @@ contract ContractTest is Test {
         emit OnSharesBought(postId, address(this), uint(sharesToBuy), price, isYes);
 
         market.buy(sharesToBuy, isYes, price);
+        return price;
     }
 
     function testBuyExceededMaxCost() public {
@@ -170,6 +172,17 @@ contract ContractTest is Test {
         vm.expectEmit(true, true, true, true);
         emit OnPostFlagged(postId, address(this), reason);
         market.flag(reason);
+    }
+
+    function testRefund() public {
+        uint cost = testBuyShares();
+        testFlag();
+
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(address(market), address(this), cost);
+        vm.expectEmit(true, true, true, true);
+        emit OnRefundTaken(postId, address(this), cost);
+        market.getRefund();
     }
 
     // Delete

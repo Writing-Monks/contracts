@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.15;
+// SPDX-License-Identifier: Unlicense
+pragma solidity ^0.8.16;
 
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
@@ -48,13 +48,9 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
      * Twitter outputs an isostring for the created_at field (e.g. "created_at": "2022-07-13T13:24:11.000Z"), we translate this to a timestamp to get an uint.
      */
     function requestTweetData(string memory tweetId_, string memory fields_, string memory path_) public returns (bytes32 requestId) {
+        _chargeLink();
+
         Chainlink.Request memory req = buildOperatorRequest(readTweetJobId, this.fulfillInfo.selector);
-
-        if (linkBalance[msg.sender] < fee) {
-            revert NotEnoughLink();
-        }
-        linkBalance[msg.sender] -= fee;
-
         req.add('tweetId', tweetId_);
         req.add('tweet_fields', fields_);
         req.add('path', path_);
@@ -64,7 +60,10 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
     }
 
     function requestTweetPublication(bytes20 postId_) public returns (bytes32 requestId) {
+        _chargeLink();
+
         Chainlink.Request memory req = buildOperatorRequest(writeTweetJobId, this.fulfillPublication.selector);
+        req.add('pub', toAsciiString(msg.sender));
         req.add('postId', string(abi.encodePacked(postId_)));
 
         requestId = sendOperatorRequest(req, fee);
@@ -76,19 +75,6 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
     */
     function requestTweetLikeCount(uint tweetId_) public returns (bytes32 requestId) {
         return requestTweetData(tweetId_.toString(), 'public_metrics', 'public_metrics,like_count');
-    }
-
-    /**
-    * @notice spends at max 400000 gas when calling the receiver.
-    */
-    function fulfillInfo(bytes32 requestId_, uint value_) public recordChainlinkFulfillment(requestId_) {
-        ITweetRelayerClient requester = ITweetRelayerClient(_requesters[requestId_]);
-        requester.onTweetInfoReceived{gas: 400000}(requestId_, value_);
-    }
-
-    function fulfillPublication(bytes32 requestId_, uint createdAt_, uint tweetId_) public recordChainlinkFulfillment(requestId_) {
-        ITweetRelayerClient requester = ITweetRelayerClient(_requesters[requestId_]);
-        requester.onTweetPosted{gas: 400000}(requestId_, createdAt_, tweetId_);
     }
 
     function depositLink(uint amount_, address to_) public {
@@ -106,5 +92,48 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
         if (!link.transfer(msg.sender, amount)){
             revert UnableToTransfer();
         }
+    }
+
+    // Internal only
+    // **********************************************************************************************
+    function _chargeLink() internal {
+        if (linkBalance[msg.sender] < fee) {
+            revert NotEnoughLink();
+        }
+        linkBalance[msg.sender] -= fee;
+    }
+
+    function toAsciiString(address x) internal pure returns (string memory) {
+        // from: https://ethereum.stackexchange.com/a/8447/83136
+        bytes memory s = new bytes(40);
+        for (uint i = 0; i < 20; i++) {
+            bytes1 b = bytes1(uint8(uint(uint160(x)) / (2**(8*(19 - i)))));
+            bytes1 hi = bytes1(uint8(b) / 16);
+            bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
+            s[2*i] = char(hi);
+            s[2*i+1] = char(lo);            
+        }
+        return string(s);
+    }
+
+    function char(bytes1 b) internal pure returns (bytes1 c) {
+        // from: https://ethereum.stackexchange.com/a/8447/83136
+        if (uint8(b) < 10) return bytes1(uint8(b) + 0x30);
+        else return bytes1(uint8(b) + 0x57);
+    }
+
+    // Operator only
+    // **********************************************************************************************
+    /**
+    * @notice spends at max 400000 gas when calling the receiver.
+    */
+    function fulfillInfo(bytes32 requestId_, uint value_) public recordChainlinkFulfillment(requestId_) {
+        ITweetRelayerClient requester = ITweetRelayerClient(_requesters[requestId_]);
+        requester.onTweetInfoReceived{gas: 400000}(requestId_, value_);
+    }
+
+    function fulfillPublication(bytes32 requestId_, uint createdAt_, uint tweetId_) public recordChainlinkFulfillment(requestId_) {
+        ITweetRelayerClient requester = ITweetRelayerClient(_requesters[requestId_]);
+        requester.onTweetPosted{gas: 400000}(requestId_, createdAt_, tweetId_);
     }
 }

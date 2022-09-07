@@ -27,6 +27,6 @@ interface IMonksPublication is IAccessControl {
     function emitOnPostFlagged(bytes20 postId_, address flaggedBy_, bytes32 flagReason_) external;
     function emitOnPostDeleted(bytes20 postId_) external;
     function emitOnSharesBought(bytes20 postId_, address buyer_, uint sharesBought_, uint cost_, bool isYes_) external;
-    function emitOnTokensRedeemed(bytes20 postId_, address redeemer_, uint tokensReceived_) external;
+    function emitOnTokensRedeemed(bytes20 postId_, address redeemer_, uint tokensReceived_, uint tokensBetted_) external;
     function emitOnRefundTaken(bytes20 postId_, address to_, uint value_) external;
 }

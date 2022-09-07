@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.15;
 
+pragma solidity ^0.8.16;
+
+import "@openzeppelin/contracts/access/IAccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@opengsn/contracts/src/BaseRelayRecipient.sol";
 import "./interfaces/IMonksERC20.sol";
 
 error TokenUnauthorized();
 error TokenIssuanceTooHigh();
 
-contract MonksERC20 is IMonksERC20, ERC20, BaseRelayRecipient, Ownable {
+contract MonksERC20 is IMonksERC20, ERC20, BaseRelayRecipient {
     // TODO: make it upgradeable, auction the initial supply, replace ownable and use the publication access roles
+    bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
     uint constant public maxIssuancePerPost = 3E21; // 3k
 
     address immutable publicationAddress;
@@ -26,6 +28,13 @@ contract MonksERC20 is IMonksERC20, ERC20, BaseRelayRecipient, Ownable {
 
     modifier onlyPublication () {
         if(_msgSender() != publicationAddress) {
+            revert TokenUnauthorized();
+        }
+        _;
+    }
+
+    modifier onlyPubAdmin () {
+        if (!IAccessControl(publicationAddress).hasRole(DEFAULT_ADMIN_ROLE, _msgSender())) {
             revert TokenUnauthorized();
         }
         _;
@@ -49,7 +58,7 @@ contract MonksERC20 is IMonksERC20, ERC20, BaseRelayRecipient, Ownable {
 
     // BaseRelayRecipient Functions
     // ***************************************************************************************
-    function setTrustedForwarder(address trustedForwarder_) external onlyOwner {
+    function setTrustedForwarder(address trustedForwarder_) external onlyPubAdmin {
         BaseRelayRecipient._setTrustedForwarder(trustedForwarder_);
     }
 

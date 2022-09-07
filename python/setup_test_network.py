@@ -1,7 +1,7 @@
 import web3
 import os
 
-monk = "0xA12Dd3E2049ebb0B953AD0B01914fF399955924d"
+monk = "0xccb4D1786a2d25484957f33F1354cc487bE157CD"
 
 w3 = web3.Web3(web3.Web3.HTTPProvider('HTTP://127.0.0.1:8545', request_kwargs={'timeout': 120}))
 w3.HTTPProvider().make_request(method='anvil_setBalance', params=[monk, hex(int(10E18))])

@@ -14,6 +14,8 @@ import "forge-std/Test.sol";
 
 
 contract TestMonksPubContract is Test {
+    enum Status {Active, Expired, Flagged, Deleted, Published, Resolved}
+
     MonksERC20 public token;
     uint constant initialSupply = 1000E18;
 
@@ -53,6 +55,7 @@ contract TestMonksPubContract is Test {
     event OnPublishedPost(bytes20 indexed postId, address indexed publishedBy, uint coreTeamReward, uint writerReward, uint marketFunding, uint moderationReward);
     event OnTweetPosted(bytes20 indexed postId, uint tweetId, uint deadline);
     event OnMarketResolved(bytes20 indexed postId, uint result);
+    event OnTokensRedeemed(bytes20 indexed postId, address indexed redeemer, uint tokensReceived, uint tokensBetted);
 
 
     function setUp() public {
@@ -199,9 +202,10 @@ contract TestMonksPubContract is Test {
 
     function testPublishNoAccess() public {
         testAddPost();
-        IMonksMarket market = IMonksMarket(publication.getMarketAddressOf(postId));
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
         buyShares(market, 1E18);
 
+        //depositLinkTo(address(publication), 1E18 / 10);
         vm.expectRevert(bytes(abi.encodePacked("AccessControl: account ",
          Strings.toHexString(address(this))," is missing role ", Strings.toHexString(uint256(keccak256('MODERATOR')), 32)
          )));
@@ -210,19 +214,20 @@ contract TestMonksPubContract is Test {
 
         address moderator = address(0x85);
         giveModeratorRightTo(moderator);
+        
         vm.prank(moderator);
-
-        vm.expectRevert("ERC20: transfer amount exceeds balance");
+        vm.expectRevert(NotEnoughLink.selector);
+        vm.warp(block.timestamp + 13 hours);
         publication.publish(postId);
     }
 
-    function testPublish() public {
+    function testPublish() public returns (uint) {
         address moderator = address(0x85);
         giveModeratorRightTo(moderator);
 
         testAddPost();
         IMonksMarket market = IMonksMarket(publication.getMarketAddressOf(postId));
-        buyShares(market, 1E18);
+        uint cost = buyShares(market, 1E18);
 
         depositLinkTo(address(publication), 1E18 / 10);
 
@@ -251,8 +256,10 @@ contract TestMonksPubContract is Test {
         emit OnPublishedPost(postId, moderator, coreTeamReward, writersReward, marketFunding, moderatorsReward);
 
         vm.prank(moderator);
+        vm.warp(block.timestamp + 13 hours);
         publication.publish(postId);
         vm.stopPrank();
+        return cost;
     }
 
     function testPublishTwice () public {
@@ -262,6 +269,7 @@ contract TestMonksPubContract is Test {
 
         vm.prank(moderator);
         vm.expectRevert(InvalidMarketStatusForAction.selector);
+        vm.warp(block.timestamp + 13 hours);
         publication.publish(postId);
         vm.stopPrank();
     }
@@ -330,6 +338,36 @@ contract TestMonksPubContract is Test {
         publication.resolve(postId);
     }
 
+    function testRedeem() public {
+        uint cost = testPublish();
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1656341100, 5));
+        
+        depositLinkTo(address(publication), 2E17);
+
+        vm.warp(1656341100 + 1 days + 1);
+        publication.resolve(postId);
+
+        vm.expectRevert(ResolveRequestAlreadyMade.selector);
+        publication.resolve(postId);
+
+        // 50 likes
+        mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
+        tweetRelayer.fulfillInfo.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1000));
+
+        address _marketAddress = publication.getMarketAddressOf(postId);
+        MonksMarket market = MonksMarket(_marketAddress);
+        //emit log_uint(market.exceeding());
+        //emit log_uint(market.funding() * payoutSplitBps.editors/10000);
+        //emit log_uint(uint(market.normalisedResult()) * 1 + market.funding() * payoutSplitBps.editors/10000);
+        
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(address(market), address(this), 900050089666177505526);
+        vm.expectEmit(true, true, true, true);
+        emit OnTokensRedeemed(postId, address(this), 900050089666177505526, cost);
+        market.redeemAll();
+    }
+
     function testReceiveLikeCount() public {
         testPublish();
         mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
@@ -365,10 +403,11 @@ contract TestMonksPubContract is Test {
         vm.stopPrank();
     }
 
-    function buyShares(IMonksMarket market, int sharesToBuy) public {
+    function buyShares(IMonksMarket market, int sharesToBuy) public returns (uint) {
         uint cost = market.deltaPrice(sharesToBuy, true);
         token.approve(address(market), cost);
         market.buy(sharesToBuy, true, cost);
+        return cost;
     }
 
 }

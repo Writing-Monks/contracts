@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0
+// SPDX-License-Identifier: BUSL-1.1
 
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.16;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
@@ -14,6 +14,7 @@ import './interfaces/IMonksMarket.sol';
 import './PRBMathSD59x18.sol';
 
 error Unauthorized();
+error CantPublishThisFast();
 error PostTypeNotSupported();
 error WrongSignature();
 error DoesntSumToOne();
@@ -33,7 +34,12 @@ contract MonksPublication is IMonksPublication, ITweetRelayerClient, Pausable, A
 
     // Public variables
     // ***************************************************************************************
+    // Each address has a writing and a predicting score. Which correspond to how much profit the address had doing those two activities.
+    // This could be used for a reputation score, soulbound NFTs, curriculum vitae, access, voting power, etc..
+    mapping(address => int[2]) public scores; 
     uint public postExpirationPeriod = 3 days;  // After `postExpirationPeriod` of being submitted, if the post is not published it expires and betters can get a full refund of their bets.
+    mapping(address => uint) public modLastPublication;
+    uint public publicationRate = 12 hours; // each mod can publish once every publicationRate
 
     // How much to pay for each type of post
     // Example of different types of posts may be: memes, news stories, opinion articles, etc..
@@ -73,7 +79,7 @@ contract MonksPublication is IMonksPublication, ITweetRelayerClient, Pausable, A
     event OnPostFlagged(bytes20 indexed postId, address indexed flaggedBy, bytes32 flagReason);
     event OnPostDeleted(bytes20 indexed postId);
     event OnSharesBought(bytes20 indexed postId, address indexed buyer, uint sharesBought, uint cost, bool isYes);
-    event OnTokensRedeemed(bytes20 indexed postId, address indexed redeemer, uint tokensReceived);
+    event OnTokensRedeemed(bytes20 indexed postId, address indexed redeemer, uint tokensReceived, uint tokensBetted);
     event OnRefundTaken(bytes20 indexed postId, address indexed to, uint value);
 
 
@@ -254,6 +260,10 @@ contract MonksPublication is IMonksPublication, ITweetRelayerClient, Pausable, A
         _moderationTeam = value;
     }
 
+    function setPublicationRate(uint value_) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        publicationRate = value_;
+    }
+
     // Editor and Admin Functions
     // ***************************************************************************************
 
@@ -264,6 +274,10 @@ contract MonksPublication is IMonksPublication, ITweetRelayerClient, Pausable, A
     */
 
     function publish(bytes20 postId_) public onlyRole(MonksTypes.MODERATOR_ROLE) {
+        if (modLastPublication[msg.sender] + publicationRate > block.timestamp) {
+            revert CantPublishThisFast();
+        }
+        modLastPublication[msg.sender] = block.timestamp;
         _requestTweetPublication(postId_);
 
         IMonksMarket market = IMonksMarket(getMarketAddressOf(postId_));
@@ -288,7 +302,8 @@ contract MonksPublication is IMonksPublication, ITweetRelayerClient, Pausable, A
         monksERC20.transfer(address(market), _marketFunding);
         monksERC20.transfer(_moderationTeam, _moderatorsReward);
         monksERC20.transfer(_coreTeam, _coreTeamReward);
-        
+
+        scores[author][0] += int(_writersReward);
         emit OnPublishedPost(postId_, msg.sender, _coreTeamReward, _writersReward, _marketFunding, _moderatorsReward);
     }
 
@@ -371,8 +386,9 @@ contract MonksPublication is IMonksPublication, ITweetRelayerClient, Pausable, A
         emit OnSharesBought(postId_, buyer_, sharesBought_, cost_, isYes_);
     }
 
-    function emitOnTokensRedeemed(bytes20 postId_, address redeemer_, uint tokensReceived_) public onlyMarket(postId_) {
-        emit OnTokensRedeemed(postId_, redeemer_, tokensReceived_);
+    function emitOnTokensRedeemed(bytes20 postId_, address redeemer_, uint tokensReceived_, uint tokensBetted_) public onlyMarket(postId_) {
+        scores[redeemer_][1] += int(tokensReceived_) - int(tokensBetted_);
+        emit OnTokensRedeemed(postId_, redeemer_, tokensReceived_, tokensBetted_);
     }
 
     function emitOnRefundTaken(bytes20 postId_, address to_, uint value_) public onlyMarket(postId_) {
