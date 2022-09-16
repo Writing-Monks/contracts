@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0
+// SPDX-License-Identifier: BUSL-1.1
 
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.17;
 
 import "../core/MonksTypes.sol";
 import "./IMonksERC20.sol";
@@ -16,6 +16,8 @@ interface IMonksPublication is IAccessControl {
     function alpha() external view returns(int);
     function bounds() external view returns(uint128 minResult, uint128 maxResult);
     function initialQs(uint postType, uint isYes) external view returns(int);
+    function scores(address monk, uint index) external view returns(uint);
+    function totalScore(address monk) external view returns(uint);
     
 
     function init(uint64 publicationId_, uint postExpirationPeriod_, address marketTemplate_,

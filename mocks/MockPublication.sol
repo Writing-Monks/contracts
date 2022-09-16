@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.16;
 
+import "@opengsn/contracts/src/ERC2771Recipient.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
 import "../src/interfaces/IMonksPublication.sol";
 import "../src/interfaces/IMonksERC20.sol";
 
 
-contract MockPublication is IMonksPublication, AccessControl {
+contract MockPublication is ERC2771Recipient, IMonksPublication, AccessControl {
+    mapping(address => uint[2]) public scores;
     uint public postExpirationPeriod;
     uint128[] public issuancePerPostType;
     MonksTypes.PayoutSplitBps public payoutSplitBps;
@@ -57,6 +59,10 @@ contract MockPublication is IMonksPublication, AccessControl {
         payoutSplitBps = payoutSplitBps_;
     }
 
+    function totalScore(address monk) public view returns (uint) {
+        return scores[monk][0] + scores[monk][1];
+    }
+
     function addRole(bytes32 role, address moderator) public {
         _setupRole(role, moderator);
     }
@@ -82,6 +88,18 @@ contract MockPublication is IMonksPublication, AccessControl {
 
     function emitOnRefundTaken(bytes20 postId_, address to_, uint value_) public {
         emit OnRefundTaken(postId_, to_, value_);
+    }
+
+    // ERC2771Recipient Internal Functions
+    // ***************************************************************************************
+    function _msgSender() internal view override(Context, ERC2771Recipient)
+        returns (address sender) {
+        sender = ERC2771Recipient._msgSender();
+    }
+
+    function _msgData() internal view override(Context, ERC2771Recipient)
+        returns (bytes calldata) {
+        return ERC2771Recipient._msgData();
     }
 
 }

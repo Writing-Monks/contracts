@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 
-pragma solidity ^0.8.16;
+pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/access/IAccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@opengsn/contracts/src/BaseRelayRecipient.sol";
+import "@opengsn/contracts/src/ERC2771Recipient.sol";
 import "./interfaces/IMonksERC20.sol";
 
 error TokenUnauthorized();
 error TokenIssuanceTooHigh();
 
-contract MonksERC20 is IMonksERC20, ERC20, BaseRelayRecipient {
-    // TODO: make it upgradeable, auction the initial supply, replace ownable and use the publication access roles
+contract MonksERC20 is ERC2771Recipient, IMonksERC20, ERC20 {
     bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
     uint constant public maxIssuancePerPost = 3E21; // 3k
 
@@ -56,21 +55,22 @@ contract MonksERC20 is IMonksERC20, ERC20, BaseRelayRecipient {
         _mint(publicationAddress, issuance_);
     }
 
-    // BaseRelayRecipient Functions
+    // PubAdmin Functions
     // ***************************************************************************************
     function setTrustedForwarder(address trustedForwarder_) external onlyPubAdmin {
-        BaseRelayRecipient._setTrustedForwarder(trustedForwarder_);
+        _setTrustedForwarder(trustedForwarder_);
     }
 
-    function _msgSender() internal view override(Context, BaseRelayRecipient) returns (address) {
-        return BaseRelayRecipient._msgSender();
+
+    // ERC2771Recipient Functions
+    // ***************************************************************************************
+    function _msgSender() internal view override(Context, ERC2771Recipient)
+        returns (address sender) {
+        sender = ERC2771Recipient._msgSender();
     }
 
-    function _msgData() internal override(Context, BaseRelayRecipient) view returns (bytes calldata ret) {
-        return BaseRelayRecipient._msgData();
-    }
-
-    function versionRecipient() external pure override returns (string memory){
-        return "1";
+    function _msgData() internal view override(Context, ERC2771Recipient)
+        returns (bytes calldata) {
+        return ERC2771Recipient._msgData();
     }
 }

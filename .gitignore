@@ -6,3 +6,4 @@ nohup.out
 .idea
 python
 *.env
+node_modules/

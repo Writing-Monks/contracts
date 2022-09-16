@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Unlicense
-pragma solidity ^0.8.16;
+pragma solidity ^0.8.17;
 
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
@@ -59,12 +59,13 @@ contract TweetRelayer is ITweetRelayer, ChainlinkClient {
         _requesters[requestId] = msg.sender;
     }
 
-    function requestTweetPublication(bytes20 postId_) public returns (bytes32 requestId) {
+    function requestTweetPublication(bytes20 postId_, bytes20 adId_) public returns (bytes32 requestId) {
         _chargeLink();
 
         Chainlink.Request memory req = buildOperatorRequest(writeTweetJobId, this.fulfillPublication.selector);
         req.add('pub', toAsciiString(msg.sender));
         req.add('postId', string(abi.encodePacked(postId_)));
+        req.add('adId', string(abi.encodePacked(adId_)));
 
         requestId = sendOperatorRequest(req, fee);
         _requesters[requestId] = msg.sender;

@@ -1,7 +1,6 @@
 //SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.16;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../../src/oracle/ITweetRelayerClient.sol";
 import "../../src/oracle/ITweetRelayer.sol";
 
@@ -32,7 +31,7 @@ contract MockTweetRelayerClient is ITweetRelayerClient {
         requestId = _tweetRelayer.requestTweetLikeCount(tweetId);
     }
 
-    function requestTweetPublication(bytes20 postId) public {
-        requestId = _tweetRelayer.requestTweetPublication(postId);
+    function requestTweetPublication(bytes20 postId, bytes20 adId) public {
+        requestId = _tweetRelayer.requestTweetPublication(postId, adId);
     }
 }

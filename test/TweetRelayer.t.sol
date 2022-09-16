@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.17;
 
 import "forge-std/Test.sol";
 
@@ -48,7 +48,7 @@ contract TestTweetRelayer is Test {
 
         bytes20 postId = bytes20(uint160(0x115));
         vm.prank(address(requester));
-        requestId = tweetRelayer.requestTweetPublication(postId);
+        requestId = tweetRelayer.requestTweetPublication(postId, bytes20(0x0));
         assertTrue(requestId != blank_bytes32);
 
         vm.prank(address(requester));
@@ -72,7 +72,7 @@ contract TestTweetRelayer is Test {
 
         vm.prank(address(requester));
         bytes20 postId = bytes20(uint160(0x115));
-        bytes32 requestId2 = tweetRelayer.requestTweetPublication(postId);
+        bytes32 requestId2 = tweetRelayer.requestTweetPublication(postId, bytes20(0x0));
 
 
         mockOperator.fulfillOracleRequest2(requestId2, 0.1 ether, address(tweetRelayer), 

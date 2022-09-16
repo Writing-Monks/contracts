@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@chainlink/contracts/src/v0.8/interfaces/LinkTokenInterface.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/OperatorInterface.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
 /**
  * @title The LinkTokenReceiver contract - used for the MockOracle below
@@ -89,6 +90,7 @@ abstract contract LinkTokenReceiver {
  * @notice Chainlink smart contract developers can use this to test their contracts
  */
 contract MockOperator is LinkTokenReceiver {
+    using Strings for uint256;
     uint256 private constant SELECTOR_LENGTH = 4;
     uint256 private constant EXPECTED_REQUEST_WORDS = 2;
     uint256 private constant MINIMUM_REQUEST_LENGTH = SELECTOR_LENGTH + (32 * EXPECTED_REQUEST_WORDS);
@@ -305,7 +307,7 @@ contract MockOperator is LinkTokenReceiver {
     require(s_commitments[requestId].dataVersion <= uint8(2), "Data versions must match");
     delete s_commitments[requestId];
     emit OracleResponse(requestId);
-    require(gasleft() >= MINIMUM_CONSUMER_GAS_LIMIT, "Must provide consumer enough gas");
+    require(gasleft() >= MINIMUM_CONSUMER_GAS_LIMIT, string(abi.encodePacked("Must provide consumer enough gas: ", gasleft().toString())));
     // All updates to the oracle's fulfillment should come before calling the
     // callback(addr+functionId) as it is untrusted.
     // See: https://solidity.readthedocs.io/en/develop/security-considerations.html#use-the-checks-effects-interactions-pattern

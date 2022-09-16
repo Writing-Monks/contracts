@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 
-pragma solidity ^0.8.16;
+pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -9,18 +9,16 @@ import "./PRBMathSD59x18.sol";
 import "./core/MonksTypes.sol";
 import "./interfaces/IMonksPublication.sol";
 import "./interfaces/IMonksMarket.sol";
+import "@opengsn/contracts/src/ERC2771Recipient.sol";
 
 error MarketAlreadyInitialised();
 error MarketUnauthorized();
-error InvalidMarketStatusForAction();
-error MarketExceededMaxCost();
 error MarketHasNoBets();
 error MarketIsNotFunded();
 
 
-contract MonksMarket is IMonksMarket {
+contract MonksMarket is IMonksMarket, ERC2771Recipient {
     using PRBMathSD59x18 for int256;
-    enum Status {Active, Expired, Flagged, Deleted, Published, Resolved}
 
     // Constants assigned during the initialise
     // ***************************************************************************************
@@ -38,7 +36,7 @@ contract MonksMarket is IMonksMarket {
     // Constants assigns after publication:
     uint public tweetId;
     uint public publishTime;
-    uint private totalTokensCollected;
+    uint public totalTokensCollected;
 
     // State variables
     // ***************************************************************************************
@@ -69,6 +67,7 @@ contract MonksMarket is IMonksMarket {
             revert MarketAlreadyInitialised();
         }
         _postId = postId_;
+        _setTrustedForwarder(ERC2771Recipient(msg.sender).getTrustedForwarder());
         _publication = IMonksPublication(msg.sender);
         _monksToken = _publication.monksERC20();
         uint8 postType = post_.postType;
@@ -94,7 +93,7 @@ contract MonksMarket is IMonksMarket {
     // Modifiers
     // ***************************************************************************************
     modifier onlyModerator() {
-        if (!_publication.hasRole(MonksTypes.MODERATOR_ROLE, msg.sender)) {
+        if (!_publication.hasRole(MonksTypes.MODERATOR_ROLE, _msgSender())) {
             revert MarketUnauthorized();
         }
         _;
@@ -122,12 +121,9 @@ contract MonksMarket is IMonksMarket {
         if(amountToPay > maximumCost_) {
             revert MarketExceededMaxCost();
         }
-        _monksToken.transferFrom(msg.sender, address(this), amountToPay); 
-        uint8 outcomeIndex = isYes_ ? 0 : 1;
-        q[outcomeIndex] += sharesToBuy_;
-        sharesOf[msg.sender][outcomeIndex] += sharesToBuy_;
-        tokensOf[msg.sender] += amountToPay;
-        _publication.emitOnSharesBought(_postId, msg.sender, uint(sharesToBuy_), amountToPay, isYes_);
+        _monksToken.transferFrom(_msgSender(), address(this), amountToPay);
+        _buy(sharesToBuy_, isYes_, amountToPay, _msgSender()); 
+        _publication.emitOnSharesBought(_postId, _msgSender(), uint(sharesToBuy_), amountToPay, isYes_);
     }
 
     function redeemAll() public {
@@ -135,10 +131,10 @@ contract MonksMarket is IMonksMarket {
         if (_status != Status.Resolved) { 
             revert InvalidMarketStatusForAction();
         }
-        int[2] memory shares = sharesOf[msg.sender];
+        int[2] memory shares = sharesOf[_msgSender()];
         require(shares[0] > 0 || shares[1] > 0);
-        sharesOf[msg.sender][0] = 0;
-        sharesOf[msg.sender][1] = 0;
+        sharesOf[_msgSender()][0] = 0;
+        sharesOf[_msgSender()][1] = 0;
         uint amount;
         if (shares[0] > 0) {
             amount += uint(normalisedResult.mul(shares[0]));
@@ -147,27 +143,27 @@ contract MonksMarket is IMonksMarket {
             amount += uint((1E18 - normalisedResult).mul(shares[1]));
         }
         if (exceeding > 0) {
-            amount += exceeding * tokensOf[msg.sender] / totalTokensCollected;
+            amount += exceeding * tokensOf[_msgSender()] / totalTokensCollected;
         }
-        _monksToken.transfer(msg.sender, amount);
-        _publication.emitOnTokensRedeemed(_postId, msg.sender, amount, tokensOf[msg.sender]);
+        _monksToken.transfer(_msgSender(), amount);
+        _publication.emitOnTokensRedeemed(_postId, _msgSender(), amount, tokensOf[_msgSender()]);
     }
 
     function getRefund() public {
         Status s = status();
         require(s == Status.Expired || s == Status.Flagged);
-        uint amount = tokensOf[msg.sender];
+        uint amount = tokensOf[_msgSender()];
         require(amount > 0);
-        tokensOf[msg.sender] = 0;
-        _monksToken.transfer(msg.sender, amount);
-        _publication.emitOnRefundTaken(_postId, msg.sender, amount);
+        tokensOf[_msgSender()] = 0;
+        _monksToken.transfer(_msgSender(), amount);
+        _publication.emitOnRefundTaken(_postId, _msgSender(), amount);
     }
 
     // Market Getters
     // ***************************************************************************************
-    function author() public view returns (address) {
+    function postTypeAndAuthor() public view returns (uint8, address) {
         MonksTypes.Post memory _post = post;
-        return _post.author;
+        return (_post.postType, _post.author);
     }
 
     function payoutSplitBps() external view returns (MonksTypes.PayoutSplitBps memory) {
@@ -193,6 +189,13 @@ contract MonksMarket is IMonksMarket {
 
     // Internal Functions
     // ***************************************************************************************
+
+    function _buy(int sharesToBuy_, bool isYes_, uint amountToPay_, address buyer_) internal {
+        uint8 outcomeIndex = isYes_ ? 0 : 1;
+        q[outcomeIndex] += sharesToBuy_;
+        sharesOf[buyer_][outcomeIndex] += sharesToBuy_;
+        tokensOf[buyer_] += amountToPay_;
+    }
 
     function _getB(int[2] memory q_) internal view returns (int) {
         return alpha.mul(q_[0]+ q_[1]);
@@ -228,6 +231,10 @@ contract MonksMarket is IMonksMarket {
         _status = Status.Published;
     }
 
+    function buy(int sharesToBuy_, bool isYes_, uint maximumCost_, address buyer_) public onlyPublication {
+        _buy(sharesToBuy_, isYes_, maximumCost_, buyer_);
+    }
+
     function setPublishTimeAndTweetId(uint createdAt_, uint tweetId_) public onlyPublication onlyStatus(Status.Published) {
         require(publishTime == 0); // Publish time && TweetId is only set once.
         publishTime = createdAt_;
@@ -260,19 +267,18 @@ contract MonksMarket is IMonksMarket {
     // ***************************************************************************************
     function flag(bytes32 flagReasonHash_) public onlyModerator onlyStatus(Status.Active) {
         _status = Status.Flagged;
-        _publication.emitOnPostFlagged(_postId, msg.sender, flagReasonHash_);
+        _publication.emitOnPostFlagged(_postId, _msgSender(), flagReasonHash_);
     }
 
 
     // Author Only Functions
     // ***************************************************************************************
     function deletePost() public onlyStatus(Status.Active) {
-        if (msg.sender != post.author) {
+        if (_msgSender() != post.author) {
             revert MarketUnauthorized();
         }
         require(_monksToken.balanceOf(address(this)) == 0);
         _status = Status.Deleted;
         _publication.emitOnPostDeleted(_postId);
     }
-
 }

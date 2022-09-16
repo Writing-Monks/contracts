@@ -8,6 +8,7 @@ import "../src/MonksERC20.sol";
 import "../src/core/MonksTypes.sol";
 import "../src/MonksMarket.sol";
 import "../src/MonksPublication.sol";
+import "../src/MonksTestFaucet.sol";
 
 import "../src/oracle/TweetRelayer.sol";
 import "../mocks/oracle/MockLinkToken.sol";
@@ -17,10 +18,9 @@ import "../mocks/oracle/MockOperator.sol";
 
 contract Deployer is Script, Test {
     // MonksERC20
-    uint constant initialSupply = 1000E18;
+    uint constant initialSupply = 3000 * 5 * 4 * 3 ether; // three months of posting 
     MonksERC20 public token;
     
-
     // Oracle
     LinkToken public linkToken;
     MockOperator public mockOperator;
@@ -31,11 +31,11 @@ contract Deployer is Script, Test {
     // Publication
     MonksPublication public publication;
     MonksTypes.ResultBounds public bounds = MonksTypes.ResultBounds(0, 1000);
-    MonksTypes.PayoutSplitBps payoutSplitBps = MonksTypes.PayoutSplitBps(1500, 4000, 3000, 1500);
+    MonksTypes.PayoutSplitBps payoutSplitBps = MonksTypes.PayoutSplitBps(2500, 4000, 2500, 1000);
     uint constant postExpirationPeriod = 3 days;
     uint128[] issuancePerPostType = [3e21];
     int constant alpha = 36067376022224088;
-    int[2][] initialQs = [[int(3757338014575875325952), int(4641401983168921206784)]];
+    int[2][] initialQs = [[int(3131115012146561810432), int(3867834985974099607552)]];
     address public publicationAdmin = 0xccb4D1786a2d25484957f33F1354cc487bE157CD;
     address coreTeam = address(0x6);
     address postSigner = 0x777C108aCC97d147ba540a99d70704dA36f3D4C2;
@@ -53,11 +53,22 @@ contract Deployer is Script, Test {
             writeTweetJobId);
 
         // ERC20
+        emit log_named_address('LinkToken:', address(linkToken));
+        emit log_named_address('Mock Operator:', address(mockOperator));
+        emit log_named_address('TweetRelayer:', address(tweetRelayer));
         publication = new MonksPublication();
         emit log_named_address('Publication address:', address(publication));
 
-        token = new MonksERC20(initialSupply, address(publication), "Crypto Alpha", "CAL");
+        linkToken.approve(address(tweetRelayer), 2 ether);
+        tweetRelayer.depositLink(2 ether, address(publication));
+
+        token = new MonksERC20(initialSupply, address(publication), "Monks Test", "TEST");
         emit log_named_address('Token address:', address(token));
+
+        MonksTestFaucet testFaucet = new MonksTestFaucet(address(token));
+        token.transfer(address(testFaucet), 45000 ether);
+        emit log_named_address('Test Token Faucet', address(testFaucet));
+        
         // Fund our user
         token.transfer(testUser, 300 ether);
 
