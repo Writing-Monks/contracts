@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.17;
 
 import "../src/MonksPublication.sol";
 import "../src/MonksERC20.sol";
@@ -52,10 +52,11 @@ contract TestMonksPubContract is Test {
 
     event OnIssuanceParamsUpdated(uint128[] issuancePerPostType_, int[2][] initialQs, int alpha);
     event OnPostMade(address indexed author, bytes20 indexed postId, bytes32 contentHash, int alpha, int[2] initialQ, MonksTypes.ResultBounds bounds);
-    event OnPublishedPost(bytes20 indexed postId, address indexed publishedBy, uint coreTeamReward, uint writerReward, uint marketFunding, uint moderationReward);
+    event OnPublishedPost(bytes20 indexed postId, bytes20 indexed adId, address indexed publishedBy, uint coreTeamReward, uint writerReward, uint marketFunding, uint moderationReward);
     event OnTweetPosted(bytes20 indexed postId, uint tweetId, uint deadline);
     event OnMarketResolved(bytes20 indexed postId, uint result);
     event OnTokensRedeemed(bytes20 indexed postId, address indexed redeemer, uint tokensReceived, uint tokensBetted);
+    event OnSharesBought(bytes20 indexed postId, address indexed buyer, uint sharesBought, uint cost, bool isYes);
 
 
     function setUp() public {
@@ -200,6 +201,59 @@ contract TestMonksPubContract is Test {
         vm.stopPrank();
     }
 
+    function testBuySharesInvalidMarketStatus() public {
+        testAddPost();
+        address moderator = address(0x85);
+        
+        giveModeratorRightTo(moderator);
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
+        
+        vm.prank(moderator);
+        market.flag(keccak256('flag'));
+        
+        int sharesToBuy = int(1 ether);
+        uint cost = market.deltaPrice(sharesToBuy, true);
+        vm.expectRevert(InvalidMarketStatusForAction.selector);
+        publication.buyFromMarket(postId, sharesToBuy, true, cost);
+    }
+
+    function testBuySharesMarketExceededMaxCost() public {
+        testAddPost();
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
+        int sharesToBuy = int(1 ether);
+        uint cost = market.deltaPrice(sharesToBuy, true);
+        vm.expectRevert(MarketExceededMaxCost.selector);
+        publication.buyFromMarket(postId, sharesToBuy, true, cost - 1);
+    }
+
+    function testBuySharesNoTokenAllowance() public {
+        testAddPost();
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
+        int sharesToBuy = int(1 ether);
+        uint cost = market.deltaPrice(sharesToBuy, true);
+        vm.expectRevert('ERC20: insufficient allowance');
+        publication.buyFromMarket(postId, sharesToBuy, true, cost);
+    }
+
+    function testBuyShares() public {
+        testAddPost();
+        token.approve(address(publication), type(uint).max);
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
+        int sharesToBuy = int(1 ether);
+        uint cost = market.deltaPrice(sharesToBuy, true);
+        vm.expectEmit(true, true, true, true);
+        emit OnSharesBought(postId, address(this), uint(sharesToBuy), cost, true);
+        publication.buyFromMarket(postId, sharesToBuy, true, cost);
+    }
+
+    function buySharesViaPub(bytes20 postId_, int sharesToBuy) public returns (uint) {
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
+        uint cost = market.deltaPrice(sharesToBuy, true);
+        
+        publication.buyFromMarket(postId_, sharesToBuy, true, cost);
+        return cost;
+    }
+
     function testPublishNoAccess() public {
         testAddPost();
         MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
@@ -226,7 +280,7 @@ contract TestMonksPubContract is Test {
         giveModeratorRightTo(moderator);
 
         testAddPost();
-        IMonksMarket market = IMonksMarket(publication.getMarketAddressOf(postId));
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
         uint cost = buyShares(market, 1E18);
 
         depositLinkTo(address(publication), 1E18 / 10);
@@ -240,12 +294,13 @@ contract TestMonksPubContract is Test {
         vm.expectEmit(true, true, true, true);
         emit Transfer(address(0x0), address(publication), funding);
 
+        (, address author_) = market.postTypeAndAuthor();
         uint marketFunding = funding * payoutSplitBps.editors / 10000;
         uint writersReward = funding * payoutSplitBps.writer / 10000;
         uint moderatorsReward = funding * payoutSplitBps.moderators / 10000;
         uint coreTeamReward = funding * payoutSplitBps.coreTeam / 10000;
         uint[4] memory rewards = [writersReward, marketFunding, moderatorsReward, coreTeamReward];
-        address[4] memory addresses = [market.author(), address(market), address(0x6), coreTeam];
+        address[4] memory addresses = [author_, address(market), address(0x6), coreTeam];
 
         for (uint i = 0; i < 4; i++) {
             vm.expectEmit(true, true, true, true);
@@ -253,7 +308,7 @@ contract TestMonksPubContract is Test {
         }
 
         vm.expectEmit(true, true, true, true);
-        emit OnPublishedPost(postId, moderator, coreTeamReward, writersReward, marketFunding, moderatorsReward);
+        emit OnPublishedPost(postId, bytes20(0x0), moderator, coreTeamReward, writersReward, marketFunding, moderatorsReward);
 
         vm.prank(moderator);
         vm.warp(block.timestamp + 13 hours);
@@ -295,12 +350,12 @@ contract TestMonksPubContract is Test {
         mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
         tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 1656341100, tweetId));
 
-        IMonksMarket market = IMonksMarket(publication.getMarketAddressOf(postId));
+        MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
         assertEq(market.publishTime(), 1656341100);
         assertEq(market.tweetId(), tweetId);
 
         vm.prank(publicationAdmin);
-        publication.requestTweetPublication(postId);
+        publication.requestTweetPublication(postId, bytes20(0x0));
 
         mockOperator.fulfillOracleRequest2(mockOperator.lastRequestIdReceived(), 0.1 ether, address(tweetRelayer),
         tweetRelayer.fulfillPublication.selector, 5 minutes, abi.encode(mockOperator.lastRequestIdReceived(), 2, 5));
@@ -383,7 +438,7 @@ contract TestMonksPubContract is Test {
         MonksMarket market = MonksMarket(publication.getMarketAddressOf(postId));
 
         assertEq(market.normalisedResult(), 50*1E18 / 1000);
-        assertTrue(market.status() == MonksMarket.Status.Resolved);
+        assertTrue(market.status() == IMonksMarket.Status.Resolved);
 
         vm.prank(publicationAdmin);
         publication.requestLikeCount(postId);
@@ -403,7 +458,7 @@ contract TestMonksPubContract is Test {
         vm.stopPrank();
     }
 
-    function buyShares(IMonksMarket market, int sharesToBuy) public returns (uint) {
+    function buyShares(MonksMarket market, int sharesToBuy) public returns (uint) {
         uint cost = market.deltaPrice(sharesToBuy, true);
         token.approve(address(market), cost);
         market.buy(sharesToBuy, true, cost);

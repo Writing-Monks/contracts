@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.15;
+pragma solidity ^0.8.17;
 
 import "../mocks/MockPublication.sol";
 import "../src/interfaces/IMonksPublication.sol";
@@ -10,7 +10,7 @@ import "../src/MonksMarket.sol";
 
 import "forge-std/Test.sol";
 
-// TODO: test OnTokensRedeemed
+
 contract ContractTest is Test {
     using stdStorage for StdStorage;
     // TODO: more testing regarding resolving and balance > debt

@@ -1,27 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.16;
+pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 
 contract MonksTestFaucet {
-    uint constant private amount = 100 ether;
-    uint constant private cooldownPeriod = 6 hours;
-    IERC20 immutable token;
+    uint constant private _amount = 100 ether;
+    uint constant private _cooldownPeriod = 6 hours;
+    IERC20 immutable private _token;
 
-    mapping (address => uint) lastWithdraw;
+    mapping (address => uint) public lastWithdraw;
 
     constructor(address tokenAddress) {
-        token = IERC20(tokenAddress);
+        _token = IERC20(tokenAddress);
     }
 
-    function widthraw() public {
-        uint balance = token.balanceOf(address(this));
+    function withdraw() public {
+        uint balance = reserves();
         require(balance > 0, "NoMoreTokens");
-        require(lastWithdraw[msg.sender] + cooldownPeriod < block.timestamp, "NeedToWaitMore");
+        require(lastWithdraw[msg.sender] + _cooldownPeriod < block.timestamp, "NeedToWaitMore");
         lastWithdraw[msg.sender] = block.timestamp;
 
-        token.transfer(msg.sender, balance >= amount ? amount : balance);
+        _token.transfer(msg.sender, balance >= _amount ? _amount : balance);
+    }
+
+    function reserves() public view returns (uint) {
+        return _token.balanceOf(address(this));
     }
 
 }
